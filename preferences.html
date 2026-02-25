@@ -1,0 +1,57 @@
+<h2>Preferences</h2>
+
+<label>My Call:</label>
+<input id="myCall"><br>
+
+<label>BBS Call:</label>
+<input id="bbsCall"><br>
+
+<label>Node Call:</label>
+<input id="nodeCall"><br>
+
+<label>Digi 1:</label>
+<input id="digi1"><br>
+
+<label>Digi 2:</label>
+<input id="digi2"><br>
+
+<label>VARA IP:</label>
+<input id="varaIP"><br>
+
+<label>VARA Command Port:</label>
+<input id="varaCmdPort"><br>
+
+<label>VARA Data Port:</label>
+<input id="varaDataPort"><br>
+
+<button id="saveBtn">Save</button>
+
+<script>
+window.addEventListener('DOMContentLoaded', async () => {
+  const s = await window.settings.get();
+
+  myCall.value = s.myCall;
+  bbsCall.value = s.bbsCall;
+  nodeCall.value = s.nodeCall;
+  digi1.value = s.digi1;
+  digi2.value = s.digi2;
+  varaIP.value = s.varaIP;
+  varaCmdPort.value = s.varaCmdPort;
+  varaDataPort.value = s.varaDataPort;
+
+  saveBtn.addEventListener('click', async () => {
+    await window.settings.set({
+      myCall: myCall.value,
+      bbsCall: bbsCall.value,
+      nodeCall: nodeCall.value,
+      digi1: digi1.value,
+      digi2: digi2.value,
+      varaIP: varaIP.value,
+      varaCmdPort: Number(varaCmdPort.value),
+      varaDataPort: Number(varaDataPort.value)
+    });
+
+    window.close();
+  });
+});
+</script>
