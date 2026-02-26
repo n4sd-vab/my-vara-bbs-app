@@ -249,6 +249,16 @@
             const composeTo = document.getElementById('composeTo'); 
             const composeSubject = document.getElementById('composeSubject'); 
             const composeType = document.getElementById('composeType');
+
+            const addressBookModal = document.getElementById('addressBookModal');
+            const addressBookCancelBtn = document.getElementById('addressBookCancelBtn');
+            const addressBookSaveBtn = document.getElementById('addressBookSaveBtn');
+            const addCallsign = document.getElementById('addCallsign');
+            const addName = document.getElementById('addName');
+            const addLocation = document.getElementById('addLocation');
+            const addHomeBBS = document.getElementById('addHomeBBS');
+            const addNotes = document.getElementById('addNotes');
+
             const connectBtn = document.getElementById('connectBtn');
             const connectBbsBtn = document.getElementById('connectBbsBtn');
             const disconnectBbsBtn = document.getElementById('disconnectBbsBtn');
@@ -341,6 +351,25 @@
                 const section = document.getElementById("varaConsoleSection");
                 section.style.display = visible ? "block" : "none";
             });
+
+
+            const cancelBtn = document.getElementById("addressBookCancelBtn");
+            const saveBtn = document.getElementById("addressBookSaveBtn");
+
+            window.electronAPI.onOpenAddressBook(() => {
+                addressBookModal.style.display = "flex";
+            });
+
+            cancelBtn.addEventListener("click", () => {
+                addressBookModal.style.display = "none";
+            });
+
+            saveBtn.addEventListener("click", () => {
+                // You’ll wire this to the DB next
+                addressBookModal.style.display = "none";
+            });
+
+    
 
             // Listen for message context menu events
 
@@ -679,6 +708,33 @@
             <div style="text-align:right;">
                 <button id="composeCancelBtn" class="modal-btn cancel">Cancel</button>
                 <button id="composeSendBtn" class="modal-btn send">Send</button>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="addressBookModal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>Address Book</h3>
+
+            <label>Callsign:</label><br>
+            <input id="addCallsign" class="modal-input"><br>
+
+            <label>Name:</label><br>
+            <input id="addName" class="modal-input"><br>
+
+            <label>Location:</label><br>
+            <input id="addLocation" class="modal-input"><br>
+
+            <label>Home BBS:</label><br>
+            <input id="addHomeBBS" class="modal-input"><br>
+
+            <label>Notes:</label><br>
+            <textarea id="addNotes" rows="4" class="modal-input"></textarea>
+
+            <div style="text-align:right;">
+                <button id="addressBookCancelBtn" class="modal-btn cancel">Cancel</button>
+                <button id="addressBookSaveBtn" class="modal-btn save">Save</button>
             </div>
         </div>
     </div>

@@ -1,5 +1,5 @@
 {
-  "name": "vara-mail-demo",
+  "name": "my-vara-bbs-app",
   "version": "1.0.0",
   "description": "Native VARA BBS Client",
   "main": "main.js",
@@ -7,6 +7,7 @@
     "start": "electron-forge start",
     "test": "echo \"Error: no test specified\" && exit 1",
     "package": "electron-forge package",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
     "make": "electron-forge make"
   },
   "keywords": [],
@@ -22,9 +23,11 @@
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.1",
     "@electron-forge/plugin-fuses": "^7.11.1",
     "@electron/fuses": "^1.8.0",
-    "electron": "^40.2.1"
+    "electron": "^40.2.1",
+    "electron-rebuild": "^3.2.9"
   },
   "dependencies": {
+    "better-sqlite3": "^12.6.2",
     "electron-squirrel-startup": "^1.0.1"
   }
 }

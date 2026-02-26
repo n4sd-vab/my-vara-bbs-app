@@ -1,9 +1,17 @@
 const { app, BrowserWindow, ipcMain, Menu, MenuItem } = require('electron');
+const Database = require('better-sqlite3');
 const path = require('path');
 const net = require('net');
 const fs = require('fs');
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+const dbPath = path.join(app.getPath('userData'), 'bbs.db');
+
+const db = new Database(dbPath);
+initializeDatabase();
+
+
 
 function loadSettings() {
   try {
@@ -15,14 +23,13 @@ function loadSettings() {
       nodeCall: "",
       digi1: "",
       digi2: "",
-      varaIP: "192.168.1.12",
-      varaCmdPort: 8300,
-      varaDataPort: 8301,
+      varaIP: "",
+      varaCmdPort: "",
+      varaDataPort: "",
       showVaraConsole: true
     };
   }
 }
-
 
 let prefWindow = null;
 
@@ -74,9 +81,15 @@ const menuTemplate = [
         click: () => {
           createPreferencesWindow();
         }
+      },
+      {
+        label: "Address Book",
+        click: () => {
+          mainWindow.webContents.send("open-address-book");
+        }
       }
     ]
-   
+
   },
   {
     label: "View",
@@ -112,6 +125,46 @@ function createWindow() {
 
   mainWindow.loadFile('index.html');
 }
+
+function initializeDatabase() {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY,
+            msgNum INTEGER,
+            type TEXT,
+            date TEXT,
+            sender TEXT,
+            recipient TEXT,
+            at TEXT,
+            subject TEXT,
+            body TEXT,
+            read INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS address_book (
+            id INTEGER PRIMARY KEY,
+            callsign TEXT UNIQUE,
+            name TEXT,
+            location TEXT,
+            homebbs TEXT,
+            notes TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY,
+            timestamp TEXT,
+            direction TEXT,
+            content TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_messages_msgNum ON messages(msgNum);
+
+        CREATE INDEX IF NOT EXISTS idx_address_callsign ON address_book(callsign);
+
+    `);
+}
+
+
 
 app.whenReady().then(() => {
   createWindow();

@@ -21,5 +21,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.send("show-message-context-menu", data),
 
     onReplyToSender: (callback) =>
-        ipcRenderer.on("reply-to-sender", (_e, data) => callback(data))
+        ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),
+    
+    onOpenAddressBook: (callback) =>
+    ipcRenderer.on("open-address-book", () => callback())
+
 });
