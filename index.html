@@ -159,6 +159,11 @@
             background: #0078ff;
             color: white;
         }
+
+        .modal-btn.save {
+            background: #0078ff;
+            color: white;
+        }
     </style>
 </head>
 
@@ -253,6 +258,8 @@
             const addressBookModal = document.getElementById('addressBookModal');
             const addressBookCancelBtn = document.getElementById('addressBookCancelBtn');
             const addressBookSaveBtn = document.getElementById('addressBookSaveBtn');
+            const addressBookViewModal = document.getElementById('addressBookViewModal');
+            const addressBookViewClose = document.getElementById('addressBookViewClose');
             const addCallsign = document.getElementById('addCallsign');
             const addName = document.getElementById('addName');
             const addLocation = document.getElementById('addLocation');
@@ -284,6 +291,7 @@
             const composeSendBtn = document.getElementById('composeSendBtn');
 
             console.log("Loaded settings:", appSettings);
+
 
             window.electronAPI.onReplyToSender(({ sender, subject }) => {
                 composeModal.style.display = "flex";
@@ -320,6 +328,9 @@
                 msgView.innerHTML = "<em>Select a message to view it</em>";
             }
             
+            // Parse a message list line to extract message number, 
+            // sender, and subject for context menu
+
             function parseMsgListLine(line) {
                 const parts = line.trim().split(/\s+/);
                 const msgNum = parts[0];
@@ -329,8 +340,6 @@
             }
 
             // Handle incoming logs from main.js
-
-
 
             function setConnectedUI(connected) {
                 connectBtn.disabled = connected;
@@ -346,6 +355,20 @@
                 statusText.textContent = connected ? "Connected" : "Disconnected";
                 statusText.style.color = connected ? "#0f0" : "#f33";
             }
+
+            // Load address book entries into the view modal
+            function loadAddressBookEntries() {
+                const list = document.getElementById("addressBookList");
+                const entries = window.electronAPI.getAddressBook(); // IPC call you’ll add
+                list.innerHTML = entries.map(e =>
+                    `<div class="ab-row">
+                        <strong>${e.callsign}</strong> — ${e.name || ""} (${e.location || ""})
+                    </div>`
+                ).join("");
+            }
+
+
+
             // Listen for VARA console toggle from main process
             window.electronAPI.onToggleVaraConsole((visible) => {
                 const section = document.getElementById("varaConsoleSection");
@@ -354,24 +377,57 @@
 
 
             const cancelBtn = document.getElementById("addressBookCancelBtn");
-            const saveBtn = document.getElementById("addressBookSaveBtn");
+            // const saveBtn = document.getElementById("addressBookSaveBtn");
 
-            window.electronAPI.onOpenAddressBook(() => {
+
+            window.electronAPI.onOpenAddressBookAdd(async () => {
                 addressBookModal.style.display = "flex";
+                // optionally retrieve existing entries (for debugging / later use)
+                try {
+                    const entries = await window.electronAPI.getAddressBook();
+                    console.log('Address book entries:', entries);
+                } catch (err) {
+                    console.error('Failed to load address book', err);
+                }
             });
 
             cancelBtn.addEventListener("click", () => {
                 addressBookModal.style.display = "none";
             });
 
-            saveBtn.addEventListener("click", () => {
-                // You’ll wire this to the DB next
+            addressBookSaveBtn.addEventListener("click", async () => {
+                // gather values from form
+                const entry = {
+                    callsign: addCallsign.value,
+                    name: addName.value,
+                    location: addLocation.value,
+                    homebbs: addHomeBBS.value,
+                    notes: addNotes.value
+                };
+
+                // send to main process for persistence
+                await window.electronAPI.saveAddressBookEntry(entry);
+
+                // clear the form for next time
+                addCallsign.value = '';
+                addName.value = '';
+                addLocation.value = '';
+                addHomeBBS.value = '';
+                addNotes.value = '';
+
                 addressBookModal.style.display = "none";
             });
 
-    
 
+            window.electronAPI.onOpenAddressBookView(() => {
+                addressBookViewModal.style.display = "flex";
+                loadAddressBookEntries(); 
+
+            });
+
+            //  
             // Listen for message context menu events
+            //   
 
             window.vara.onLog(({ type, msg }) => {
                 appendCommand(type, msg);
@@ -620,8 +676,11 @@
                 composeModal.style.display = "none";
             });
 
-            
+            addressBookViewClose.addEventListener('click', () => {
+                addressBookViewModal.style.display = "none";
+            });
 
+            
             composeSendBtn.addEventListener('click', async () => {
                 const to = document.getElementById('composeTo').value.trim();
                 const subject = document.getElementById('composeSubject').value.trim();
@@ -715,7 +774,7 @@
 
     <div id="addressBookModal" class="modal-overlay">
         <div class="modal-window">
-            <h3>Address Book</h3>
+            <h3>Address Book Add</h3>
 
             <label>Callsign:</label><br>
             <input id="addCallsign" class="modal-input"><br>
@@ -738,6 +797,15 @@
             </div>
         </div>
     </div>
-</body>
+    
+    <div id="addressBookViewModal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>Address Book List</h3>
+            <div id="addressBookList" class="scroll-area"></div>
+            <button id="addressBookViewClose" class="modal-btn cancel">Close</button>
+        </div>
+    </div>
+    
+    </body>
 
 </html>

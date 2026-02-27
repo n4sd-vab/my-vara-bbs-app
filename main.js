@@ -83,9 +83,15 @@ const menuTemplate = [
         }
       },
       {
-        label: "Address Book",
+        label: "Address Book Add",
         click: () => {
-          mainWindow.webContents.send("open-address-book");
+          mainWindow.webContents.send("open-address-book-add");
+        }
+      },
+      {
+        label: "Address Book View",
+        click: () => {
+          mainWindow.webContents.send("open-address-book-view");
         }
       }
     ]
@@ -124,6 +130,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
+
+  if (!app.isPackaged) {
+    mainWindow.webContents.openDevTools();
+  } 
 }
 
 function initializeDatabase() {
@@ -313,5 +323,29 @@ ipcMain.on("show-message-context-menu", (event, data) => {
     }));
 
     menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
+});
+
+// Address book IPC handlers
+ipcMain.handle('address-book-save', (_event, entry) => {
+    const stmt = db.prepare(`INSERT OR REPLACE INTO address_book
+        (callsign, name, location, homebbs, notes)
+        VALUES (@callsign, @name, @location, @homebbs, @notes)`);
+    stmt.run(entry);
+});
+
+ipcMain.handle('address-book-get', () => {
+    const stmt = db.prepare(`SELECT * FROM address_book ORDER BY callsign`);
+    return stmt.all();
+});
+
+ipcMain.handle("addressbook-get-all", () => {
+    return db.prepare("SELECT * FROM address_book ORDER BY callsign").all();
+});
+
+console.log("DB Path:", dbPath);
+
+
+ipcMain.handle("addressbook-debug", () => {
+    return db.prepare("SELECT * FROM address_book").all();
 });
 
