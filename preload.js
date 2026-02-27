@@ -23,7 +23,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onReplyToSender: (callback) =>
         ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),
     
-    onOpenAddressBook: (callback) =>
-        ipcRenderer.on("open-address-book", () => callback())
+    onOpenAddressBookAdd: (callback) =>
+        ipcRenderer.on("open-address-book-add", () => callback()),
+
+    // address book helpers
+    saveAddressBookEntry: (entry) => ipcRenderer.invoke('address-book-save', entry),
+
+    onOpenAddressBookView: (callback) =>
+        ipcRenderer.on("open-address-book-view", () => callback()),
+
+    getAddressBook: () => ipcRenderer.invoke('address-book-get'),
+
+    getAddressBook: () => ipcRenderer.invoke("addressbook-get-all"),
+
+    searchAddressBook: (prefix) => ipcRenderer.invoke("addressbook-search", prefix),
+
+    debugAddressBook: () => ipcRenderer.invoke("addressbook-debug")
+
 
 });
