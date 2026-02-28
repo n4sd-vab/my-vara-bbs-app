@@ -1,2 +1,3 @@
-node_modules
-out
+# Things not to send to github
+node_modules/
+out/
