@@ -338,9 +338,28 @@ ipcMain.handle('address-book-get', () => {
     return stmt.all();
 });
 
-ipcMain.handle("addressbook-get-all", () => {
-    return db.prepare("SELECT * FROM address_book ORDER BY callsign").all();
+ipcMain.handle("addressbook-delete", (event, id) => {
+    db.prepare("DELETE FROM address_book WHERE id = ?").run(id);
 });
+
+ipcMain.handle("addressbook-get-one", (event, id) => {
+    return db.prepare("SELECT * FROM address_book WHERE id = ?").get(id);
+});
+
+ipcMain.handle("addressbook-update", (event, entry) => {
+    db.prepare(`
+        UPDATE address_book
+        SET callsign = ?, name = ?, location = ?, homebbs = ?, notes = ?
+        WHERE id = ?
+    `).run(entry.callsign, entry.name, entry.location, entry.homebbs, entry.notes, entry.id);
+});
+
+
+
+
+//ipcMain.handle("addressbook-get-all", () => {
+  //  return db.prepare("SELECT * FROM address_book ORDER BY callsign").all();
+//});
 
 console.log("DB Path:", dbPath);
 

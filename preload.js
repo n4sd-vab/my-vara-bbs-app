@@ -34,11 +34,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     getAddressBook: () => ipcRenderer.invoke('address-book-get'),
 
-    getAddressBook: () => ipcRenderer.invoke("addressbook-get-all"),
-
     searchAddressBook: (prefix) => ipcRenderer.invoke("addressbook-search", prefix),
 
-    debugAddressBook: () => ipcRenderer.invoke("addressbook-debug")
+    debugAddressBook: () => ipcRenderer.invoke("addressbook-debug"),
 
+    deleteAddressBookEntry: (id) => ipcRenderer.invoke("addressbook-delete", id),
+
+    getAddressBookEntry: (id) => ipcRenderer.invoke("addressbook-get-one", id),
+
+    updateAddressBookEntry: (entry) => ipcRenderer.invoke("addressbook-update", entry)
 
 });

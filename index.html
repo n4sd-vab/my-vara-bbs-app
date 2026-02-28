@@ -12,6 +12,14 @@
             padding: 0;
         }
 
+        table, th, td {
+            border: 1px solid rgb(97, 97, 97); /* Sets border width, style, and color */
+            border-collapse: collapse; /* Collapses double borders into a single border */
+        }
+        th, td {
+            padding: 2px;
+        }
+
         #toolbar {
             padding: 10px;
             background: #eee;
@@ -120,6 +128,15 @@
             color: #222;
             padding: 20px;
             width: 420px;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
+            font-family: sans-serif;
+        }
+        .modal-window-2 {
+            background: #fff;
+            color: #222;
+            padding: 20px;
+            width: auto;
             border-radius: 8px;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
             font-family: sans-serif;
@@ -355,17 +372,38 @@
                 statusText.textContent = connected ? "Connected" : "Disconnected";
                 statusText.style.color = connected ? "#0f0" : "#f33";
             }
+            // Attach handlers to Edit/Delete buttons in address book view
+            function attachAddressBookRowHandlers() {
+                document.querySelectorAll(".ab-edit").forEach(btn => {
+                    btn.addEventListener("click", async () => {
+                        const id = btn.dataset.id;
+                        const entry = await window.electronAPI.getAddressBookEntry(id);
+                        openEditAddressBookModal(entry);
+                    });
+                });
 
-            // Load address book entries into the view modal
-            function loadAddressBookEntries() {
-                const list = document.getElementById("addressBookList");
-                const entries = window.electronAPI.getAddressBook(); // IPC call you’ll add
-                list.innerHTML = entries.map(e =>
-                    `<div class="ab-row">
-                        <strong>${e.callsign}</strong> — ${e.name || ""} (${e.location || ""})
-                    </div>`
-                ).join("");
+                document.querySelectorAll(".ab-delete").forEach(btn => {
+                    btn.addEventListener("click", async () => {
+                        const id = btn.dataset.id;
+                        await window.electronAPI.deleteAddressBookEntry(id);
+                        window.electronAPI.onOpenAddressBookView(); // reload the table
+                    });
+                });
             }
+
+            function openEditAddressBookModal(entry) {
+                addCallsign.value = entry.callsign;
+                addName.value = entry.name;
+                addLocation.value = entry.location;
+                addHomeBBS.value = entry.homebbs;
+                addNotes.value = entry.notes;
+
+                addressBookSaveBtn.textContent = "Update";
+                addressBookSaveBtn.dataset.id = entry.id;
+
+                addressBookModal.style.display = "flex";
+            }
+
 
 
 
@@ -375,10 +413,8 @@
                 section.style.display = visible ? "block" : "none";
             });
 
-
             const cancelBtn = document.getElementById("addressBookCancelBtn");
             // const saveBtn = document.getElementById("addressBookSaveBtn");
-
 
             window.electronAPI.onOpenAddressBookAdd(async () => {
                 addressBookModal.style.display = "flex";
@@ -396,8 +432,8 @@
             });
 
             addressBookSaveBtn.addEventListener("click", async () => {
-                // gather values from form
                 const entry = {
+                    id: addressBookSaveBtn.dataset.id || null,
                     callsign: addCallsign.value,
                     name: addName.value,
                     location: addLocation.value,
@@ -405,25 +441,55 @@
                     notes: addNotes.value
                 };
 
-                // send to main process for persistence
-                await window.electronAPI.saveAddressBookEntry(entry);
+                if (entry.id) {
+                    await window.electronAPI.updateAddressBookEntry(entry);
+                } else {
+                    await window.electronAPI.saveAddressBookEntry(entry);
+                }
 
-                // clear the form for next time
-                addCallsign.value = '';
-                addName.value = '';
-                addLocation.value = '';
-                addHomeBBS.value = '';
-                addNotes.value = '';
+                addressBookSaveBtn.textContent = "Save";
+                delete addressBookSaveBtn.dataset.id;
+
+                addCallsign.value = "";
+                addName.value = "";
+                addLocation.value = "";
+                addHomeBBS.value = "";
+                addNotes.value = "";
 
                 addressBookModal.style.display = "none";
             });
 
 
-            window.electronAPI.onOpenAddressBookView(() => {
+            window.electronAPI.onOpenAddressBookView(async () => {
                 addressBookViewModal.style.display = "flex";
-                loadAddressBookEntries(); 
 
+                const tbody = document.getElementById("addressBookTableBody");
+                let entries = [];
+
+                try {
+                    entries = await window.electronAPI.getAddressBook();
+                    console.log("Address book entries:", entries);
+                } catch (err) {
+                    console.error("Failed to load address book", err);
+                }
+
+                tbody.innerHTML = entries.map(e => `
+                    <tr data-id="${e.id}">
+                    <td>${e.callsign}</td>
+                    <td>${e.name || ""}</td>
+                    <td>${e.location || ""}</td>
+                    <td>${e.homebbs || ""}</td>
+                    <td>${e.notes || ""}</td>
+                    <td>
+                        <button class="ab-edit" data-id="${e.id}">Edit</button>
+                        <button class="ab-delete" data-id="${e.id}">Delete</button>
+                    </td>
+                    </tr>
+                `).join("");
+
+                attachAddressBookRowHandlers();
             });
+                    
 
             //  
             // Listen for message context menu events
@@ -728,7 +794,7 @@
             });
 
             document.querySelectorAll('.msgRow').forEach(r => r.classList.remove('selected'));
-            row.classList.add('selected');
+            // row.classList.add('selected');
             // Is this needed? Maybe not, since we clear the message view when clicking a message, 
             // but it ensures the form is reset if user clicks "Send Message" again after sending one.
             composeTo.value = "";
@@ -799,10 +865,24 @@
     </div>
     
     <div id="addressBookViewModal" class="modal-overlay">
-        <div class="modal-window">
+        <div class="modal-window-2">
             <h3>Address Book List</h3>
-            <div id="addressBookList" class="scroll-area"></div>
-            <button id="addressBookViewClose" class="modal-btn cancel">Close</button>
+            <table class="ab-table">
+                <thead>
+                    <tr>
+                        <th>Callsign</th>
+                        <th>Name</th>
+                        <th>Location</th>
+                        <th>Home BBS</th>
+                        <th>Notes</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="addressBookTableBody"></tbody>
+            </table>
+    
+            <div style="text-align:right;">
+                <button id="addressBookViewClose" class="modal-btn cancel">Close</button>      </div>
         </div>
     </div>
     
