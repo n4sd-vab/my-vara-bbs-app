@@ -41,4 +41,17 @@ module.exports = {
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),
   ],
+  publishers: [
+    {
+      name: '@electron-forge/publisher-github',
+      config: {
+        repository: {
+          owner: 'n4sd-vab',
+          name: 'my-vara-bbs-app'
+        },
+        prerelease: false,
+        draft: false
+      },
+    },
+  ], 
 };
