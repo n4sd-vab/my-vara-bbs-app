@@ -194,10 +194,10 @@
         <button id="connectBbsBtn">Connect BBS</button>
         <button id="disconnectBbsBtn" disabled>Disconnect BBS</button>
         <div class="separator"></div>
+        <button id="listNewBtn">List New</button>
         <button id="listMineBtn">List Mine</button>
         <button id="listBullBtn">List Bulletins</button>
         <button id="listWxBtn">List Weather</button>
-        <button id="listAllBtn">List All</button>
         <div class="separator"></div>
         <button id="sendBtn">Send Message</button>
 
@@ -246,7 +246,7 @@
         <!-- RIGHT: Message Viewer -->
         <div id="msgView" style="flex:2; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5); 
                 font-family:monospace; padding:8px; border: 1px solid black; border-radius: 5px;">
-            <em>Select a message to view it</em>
+            <em>Select a message to view it</em><br>
         </div>
 
     </div>
@@ -289,7 +289,7 @@
             const listMineBtn = document.getElementById('listMineBtn');
             const listBullBtn = document.getElementById('listBullBtn');
             const listWxBtn = document.getElementById('listWxBtn');
-            const listAllBtn = document.getElementById('listAllBtn');
+            const listNewBtn = document.getElementById('listNewBtn');
             const commandConsole = document.getElementById('commandConsole');
             const commandInput = document.getElementById('commandInput');
             const rxArea = document.getElementById('rxArea');
@@ -342,7 +342,7 @@
 
             function clearMessageWindows() {
                 msgList.innerHTML = "";
-                msgView.innerHTML = "<em>Select a message to view it</em>";
+                msgView.innerHTML = "<em>Select a message to view it</em><br>";
             }
             
             // Parse a message list line to extract message number, 
@@ -367,7 +367,7 @@
                 listMineBtn.disabled = !connected;
                 listBullBtn.disabled = !connected;
                 listWxBtn.disabled = !connected;
-                listAllBtn.disabled = !connected;
+                listNewBtn.disabled = !connected;
 
                 statusText.textContent = connected ? "Connected" : "Disconnected";
                 statusText.style.color = connected ? "#0f0" : "#f33";
@@ -677,7 +677,7 @@
             });
 
             // List All (L) — goes to DATA port
-            listAllBtn.addEventListener('click', async () => {
+            listNewBtn.addEventListener('click', async () => {
                 clearMessageWindows();
                 const text = "L\r";
                 appendCommand('local', 'TX: L');
@@ -706,7 +706,7 @@
                 const msgNum = row.dataset.msg;
 
                 appendCommand('local', `TX: R ${msgNum}`);
-                msgView.innerHTML = `<em>Loading message ${msgNum}...</em>`;
+                msgView.innerHTML = `<em>Loading message ${msgNum}...</em><br/>`;
 
                 try {
                     await window.vara.sendData(`R ${msgNum}\r`);

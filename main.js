@@ -260,9 +260,9 @@ ipcMain.handle('vara-connect', async () => {
       // All complete lines except the last
       for (let i = 0; i < parts.length - 1; i++) {
         const line = parts[i].trim();
-        if (line.length > 0) {
+        //if (line.length > 0) {
           logToRenderer('data', line);
-        }
+        //}
       }
 
       // Save the incomplete tail (if any)
