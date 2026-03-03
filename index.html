@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>VARA Mail Demo</title>
+    <title>VARA BBS Client</title>
     <style>
         body {
             background: #f8fafc;
@@ -12,19 +12,51 @@
             padding: 0;
         }
 
-        table, th, td {
-            border: 1px solid rgb(97, 97, 97); /* Sets border width, style, and color */
-            border-collapse: collapse; /* Collapses double borders into a single border */
+        table,
+        th,
+        td {
+            border: 1px solid rgb(97, 97, 97);
+            /* Sets border width, style, and color */
+            border-collapse: collapse;
+            /* Collapses double borders into a single border */
         }
-        th, td {
+
+        th,
+        td {
             padding: 2px;
         }
 
-        #toolbar {
+
+
+        #commandInput {
+            width: 100%;
+        }
+
+        #emailArea {
+            width: 100%;
+            height: 250px;
+        }
+
+        #appContainer {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            /* or  100% of your window */
+        }
+
+        #toolBar {
+            flex: 0 0 auto;
             padding: 10px;
             background: #eee;
-            display: flex;
             gap: 10px;
+        }
+
+        #statusBar {
+            gap: 20px;
+            padding: 6px 10px;
+            background: #222;
+            color: #0f0;
+            font-family: monospace;
         }
 
         #log {
@@ -36,27 +68,35 @@
             font-family: monospace;
         }
 
-        #commandInput {
-            width: 100%;
+        #varaConsoleSection {
+            flex: 0 0 auto;
         }
 
-        #emailArea {
-            width: 100%;
-            height: 250px;
-        }
-        #splitPane {
-            resize: vertical;
-            overflow: auto;
-            border-bottom: 5px solid #888;
-            cursor: ns-resize;
-        }
-
-        .section {
+        #mainContent {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+            border: 2px solid transparent;
+            gap: 10px;
             padding: 10px;
         }
+
+        #msgList,
+        #msgView {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        #sendSection {
+            flex: 0 0 auto;
+            padding: 10px;
+        }
+
         .section2 {
             padding: 5px;
         }
+
         .status-bar {
             display: flex;
             align-items: center;
@@ -72,7 +112,19 @@
             margin: 0 5px;
             /* Space on either side of the separator */
         }
+        .send-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
 
+        .send-row label {
+            white-space: nowrap;
+        }
+
+        .send-row input {
+            flex: 1;
+        }
 
         .msgLink {
             color: #0af;
@@ -85,27 +137,33 @@
         }
 
         .msgRow {
+            font-family: monospace;
             padding: 2px 0;
             cursor: pointer;
         }
 
         .msgRow:hover {
-            background: #fff;
+            background: #00ff22;
         }
 
         .msgNum {
-            color: #0af;
+            color: #1b43f5;
             text-decoration: underline;
             margin-right: 6px;
         }
 
         .msgRow.selected {
-            background: #eee;
+            background: #ccc;
         }
 
         span.fixed-width {
             display: inline-block;
             width: 125px;
+        }
+
+        #dataWindow {
+            white-space: pre-wrap;
+            font-family: monospace;
         }
 
         /* Modal overlay */
@@ -132,6 +190,7 @@
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
             font-family: sans-serif;
         }
+
         .modal-window-2 {
             background: #fff;
             color: #222;
@@ -185,24 +244,20 @@
 </head>
 
 <body>
-    <div id="toolbar" style="display:flex; gap:10px; padding:10px; background:#eee;">
+    <div id="appContainer">
 
-        <button id="connectBtn">Connect to VARA</button>
-        <button id="disconnectBtn" disabled>Disconnect</button>
-        <div class="separator"></div>
-
-        <button id="connectBbsBtn">Connect BBS</button>
-        <button id="disconnectBbsBtn" disabled>Disconnect BBS</button>
-        <div class="separator"></div>
-        <button id="listNewBtn">List New</button>
-        <button id="listMineBtn">List Mine</button>
-        <button id="listBullBtn">List Bulletins</button>
-        <button id="listWxBtn">List Weather</button>
-        <div class="separator"></div>
-        <button id="sendBtn">Send Message</button>
-
-    </div>
-    <div id="statusBar" style="
+        <div id="toolBar">
+            <button id="connectBtn">Connect to VARA</button>
+            <button id="disconnectBtn" disabled>Disconnect</button> |
+            <button id="connectBbsBtn">Connect BBS</button>
+            <button id="disconnectBbsBtn" disabled>Disconnect BBS</button> |
+            <button id="listNewBtn">List New</button>
+            <button id="listMineBtn">List Mine</button>
+            <button id="listBullBtn">List Bulletins</button>
+            <button id="listWxBtn">List Weather</button> |
+            <button id="sendBtn">Send Message</button>
+        </div>
+        <div id="statusBar" style="
         display: flex;
         gap: 20px;
         padding: 6px 10px;
@@ -210,53 +265,40 @@
         color: #0f0;
         font-family: monospace;
         ">
-        <div>VARA: <span class="fixed-width" id="statusText"style="color: #f33;">Disconnected</span></div>
-        <div>LINK: <span class="fixed-width" id="statusLink"style="color: #f33;">Down</span></div>
-        <div>BUSY: <span class="fixed-width" id="statusBusy">Off</span></div>
-        <div>PTT: <span class="fixed-width" id="statusPTT">Off</span></div>
-        <div>SNR: <span class="fixed-width" id="statusSNR">--</span></div>
-        <div>BITRATE: <span class="fixed-width" id="statusRate">--</span></div>
-    </div>
-
-    <!-- VARA COMMAND CONSOLE (6 lines) -->
-    <div id="varaConsoleSection" class="section">
-        <h3>Vara Command Monitor</h3> 
-        <textarea id="commandConsole" rows="6" readonly
-            style="width:100%; resize:vertical; font-family:monospace;"></textarea> 
-        <input id="commandInput"
-            placeholder="Enter VARA API commands and press Enter" style="width:100%;" />
-    </div>
-
-    <!-- RECEIVED DATA (30 lines) -->
-    <div id="splitPane" style="
-            display:flex;
-            height:400px;
-            resize: vertical;
-            overflow: auto;
-            border: 2px solid transparent;
-            max-height: calc(100vh - 200px);
-            gap:10px; padding: 10px;
-         ">
-
-        <!-- LEFT: Message List -->
-        <div id="msgList" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5); 
-                font-family:monospace; padding:8px; border: 1px solid black; border-radius: 5px;">
+            <div>VARA: <span class="fixed-width" id="statusText" style="color: #f33;">Disconnected</span></div>
+            <div>LINK: <span class="fixed-width" id="statusLink" style="color: #f33;">Down</span></div>
+            <div>BUSY: <span class="fixed-width" id="statusBusy">Off</span></div>
+            <div>PTT: <span class="fixed-width" id="statusPTT">Off</span></div>
+            <div>SNR: <span class="fixed-width" id="statusSNR">--</span></div>
+            <div>BITRATE: <span class="fixed-width" id="statusRate">--</span></div>
         </div>
 
-        <!-- RIGHT: Message Viewer -->
-        <div id="msgView" style="flex:2; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5); 
-                font-family:monospace; padding:8px; border: 1px solid black; border-radius: 5px;">
-            <em>Select a message to view it</em><br>
+        <!-- VARA COMMAND CONSOLE (6 lines) -->
+        <div id="varaConsoleSection" style="flex: 0 0 auto; overflow-y:auto; padding:8px;">
+            <h4>Vara Command Monitor</h4>
+            <textarea id="commandConsole" rows="6" readonly
+                style="width:100%; resize:vertical; font-family:monospace;"></textarea>
+            <input id="commandInput" placeholder="Enter VARA API commands and press Enter" style="width:100%;" />
         </div>
-
+        <!-- RECEIVED DATA ( About 30 lines) -->
+        <div id="mainContent">
+            <!-- LEFT: Message List -->
+            <div id="msgList" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5); 
+                font-family:monospace; padding:8px; border: 1px solid black; border-radius: 8px;">
+            </div>
+            <!-- RIGHT: Message Viewer -->
+            <div id="msgView"
+                style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5); 
+                white-space:pre-wrap; font-family:monospace; padding:8px; border: 1px solid black; border-radius: 8px;">
+                <em>Select a message to view it</em><br>
+            </div>
+        </div>
+        <!-- SEND DATA (single line) -->
+        <div id="sendSection" class="send-row">
+            <label for="txInput">Send BBS Command:</label>
+            <input id="txInput" type="text" placeholder="Enter BBS Commands to send" />
+        </div>
     </div>
-
-    <!-- SEND DATA (single line) -->
-    <div class="section">
-        <h4>Send BBS Commands (press Enter)</h4>
-        <input id="txInput" type="text" placeholder="Enter BBS Commands to send" style="width:100%;" />
-    </div>
-
     <script>
         window.addEventListener('DOMContentLoaded', async () => {
             let varaLinkUp = false;
@@ -268,8 +310,8 @@
             const sendBtn = document.getElementById('sendBtn');
             const composeModal = document.getElementById('composeModal');
             const composeCancelBtn = document.getElementById('composeCancelBtn');
-            const composeTo = document.getElementById('composeTo'); 
-            const composeSubject = document.getElementById('composeSubject'); 
+            const composeTo = document.getElementById('composeTo');
+            const composeSubject = document.getElementById('composeSubject');
             const composeType = document.getElementById('composeType');
 
             const addressBookModal = document.getElementById('addressBookModal');
@@ -317,7 +359,7 @@
                 composeType.value = "P";
             });
 
-            document.getElementById("varaConsoleSection").style.display = 
+            document.getElementById("varaConsoleSection").style.display =
                 appSettings.showVaraConsole ? "block" : "none";
 
             console.log("txInput:", txInput);
@@ -344,7 +386,7 @@
                 msgList.innerHTML = "";
                 msgView.innerHTML = "<em>Select a message to view it</em><br>";
             }
-            
+
             // Parse a message list line to extract message number, 
             // sender, and subject for context menu
 
@@ -489,7 +531,11 @@
 
                 attachAddressBookRowHandlers();
             });
-                    
+
+            window.electronAPI.onOpenBbsHelp(() => {
+                document.getElementById("bbsHelpModal").style.display = "flex";
+            });
+
 
             //  
             // Listen for message context menu events
@@ -731,8 +777,8 @@
                     subject
                 });
             });
-        
-            
+
+
 
             sendBtn.addEventListener('click', () => {
                 composeModal.style.display = "flex";
@@ -746,7 +792,11 @@
                 addressBookViewModal.style.display = "none";
             });
 
-            
+            bbsHelpClose.addEventListener('click', () => {
+                document.getElementById("bbsHelpModal").style.display = "none";
+            });
+
+
             composeSendBtn.addEventListener('click', async () => {
                 const to = document.getElementById('composeTo').value.trim();
                 const subject = document.getElementById('composeSubject').value.trim();
@@ -863,7 +913,7 @@
             </div>
         </div>
     </div>
-    
+
     <div id="addressBookViewModal" class="modal-overlay">
         <div class="modal-window-2">
             <h3>Address Book List</h3>
@@ -880,12 +930,62 @@
                 </thead>
                 <tbody id="addressBookTableBody"></tbody>
             </table>
-    
+
             <div style="text-align:right;">
-                <button id="addressBookViewClose" class="modal-btn cancel">Close</button>      </div>
+                <button id="addressBookViewClose" class="modal-btn cancel">Close</button>
+            </div>
         </div>
     </div>
-    
-    </body>
+
+    <div id="bbsHelpModal" class="modal-overlay">
+        <div class="modal-window-2">
+            <h3>G8BPQ BBS Command Reference</h3>
+            <pre class="help-text">
+
+A - Abort Output 
+B - Logoff 
+HOMEBBS - Display or SET your HomeBBS address 
+INFO - Display information about this BBS 
+I CALL - Lookup CALL in WP Allows *CALL CALL* *CALL* wildcards 
+I@ PARAM - Lookup @BBS in WP 
+IZ PARAM - Lookup Zip Codes in WP 
+IH PARAM - Lookup HA elements in WP - eg USA EU etc 
+K - Kill Message(s) 
+K  msg#  
+KM (Kill my read messages) 
+L - List Message(s) -  
+L = List New, LR = List New (Oldest first) 
+LM = List Mine, L> Call, L< Call, L@ = List to, from or at 
+LL num = List msg num, L num-num = List Range 
+LN LY LH LK LF L$ LD = List Message with corresponding Status 
+LB LP LT = List Message with corresponding Type 
+LC = List TO fields of all active bulletins 
+You can combine most selections eg LMP, LMN LB< G8BPQ 
+LISTFILES or FILES - List files available for download 
+N Name - Set Your Name 
+NODE - Return to Node 
+OP n - Set Page Length (Output will pause every n lines) 
+PASS Password - Set BBS Password 
+Q QTH - Set Your QTH 
+R - Read Message(s)  
+R num 
+RM (Read new messages to me),  
+RMR (RM oldest first) 
+READ Name - Read File 
+S - Send Message 
+S or SP Send Personal,  
+SB Send Bull,  
+ST Send NTS,  
+SR Num - Send Reply,  
+SC Num - Send Copy 
+X - Toggle Expert Mode 
+YAPP - Download file from BBS using YAPP protocol
+
+            </pre>
+        <button id="bbsHelpClose">Close</button>
+    </div>
+</div>
+
+</body>
 
 </html>

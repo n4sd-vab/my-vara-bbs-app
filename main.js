@@ -112,6 +112,17 @@ const menuTemplate = [
 
       }
     ]
+  },
+  {
+    label: "Help",
+    submenu: [
+        {
+            label: "BBS Command Reference",
+            click: () => {
+                mainWindow.webContents.send("open-bbs-help");
+            }
+        }
+    ]
   }
 ];
 

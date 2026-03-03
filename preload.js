@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     getAddressBookEntry: (id) => ipcRenderer.invoke("addressbook-get-one", id),
 
-    updateAddressBookEntry: (entry) => ipcRenderer.invoke("addressbook-update", entry)
+    updateAddressBookEntry: (entry) => ipcRenderer.invoke("addressbook-update", entry),
+
+    onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback())
 
 });
