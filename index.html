@@ -138,7 +138,7 @@
 
         .msgRow {
             font-family: monospace;
-            padding: 2px 0;
+            white-space: pre;
             cursor: pointer;
         }
 
@@ -371,14 +371,21 @@
             }
 
             function formatBbsLine(line) {
-                const parts = line.trim().split(/\s+/);
-                const msgNum = parts[0];
+                const parts = line.split(/\s+/);
+                
+                const msgNum = parts[0] || "";
+                const date = (parts[1] || "");
+                const status = (parts[2] || "");
+                const size = (parts[3] || "").padStart(5);
+                const to = (parts[4] || "").padEnd(8);
+                const at = (parts[5] || "").padEnd(8);
+                const from = (parts[6] || "").padEnd(7);
+                const subject = parts.slice(7).join(" ");
+
+                const paddedLine = msgNum.padEnd(5) + date + " " + status + size + " " +to + at + from + subject;
 
                 return `
-                <div class="msgRow" data-msg="${msgNum}">
-                    <span class="msgNum">${msgNum}</span>
-                    ${parts.slice(1).join(" ")}
-                </div>
+                <div class="msgRow" data-msg="${msgNum}">${paddedLine}</div>
             `;
             }
 

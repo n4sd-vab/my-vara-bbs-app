@@ -209,13 +209,28 @@ function logToRenderer(type, msg) {
 }
 
 function formatBbsLine(line) {
-  const parts = line.trim().split(/\s+/);
-  const msgNum = parts[0];
+    // Do NOT trim the whole line — it removes leading spacing used for alignment
+    const parts = line.split(/\s+/);   // still splits on whitespace, but we will re-pad
+    
+    const msgNum = parts[0] || "";
+    const date = (parts[1] || "");
+    const status = (parts[2] || "").padStart(8);
+    const size = (parts[3] || "").padStart(8);
+    const to = (parts[4] || "").padStart(8);
+    const at = (parts[5] || "").padStart(8);
+    const from = (parts[6] || "").padStart(8);
+    const subject = parts.slice(7).join(" "); // subject can be long
 
-  return `
+    return `
         <div class="msgRow" data-msg="${msgNum}">
-            <span class="msgNum">${msgNum}</span>
-            ${parts.slice(1).join(" ")}
+            <span class="msgRow">${msgNum}</span>
+            <span class="msgRow">${date}</span>
+            <span class="msgRow">${status}</span>
+            <span class="msgRow">${size}</span>
+            <span class="msgRow">${to}</span>
+            <span class="msgRow">${at}</span>
+            <span class="msgRow">${from}</span>
+            <span class="msgRow">${subject}</span>
         </div>
     `;
 }
