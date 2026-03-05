@@ -1,6 +1,6 @@
 {
   "name": "my-vara-bbs-app",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Native VARA BBS Client",
   "main": "main.js",
   "scripts": {
@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
+    "electron-forge": "^5.2.4",
     "electron-squirrel-startup": "^1.0.1"
   }
 }
