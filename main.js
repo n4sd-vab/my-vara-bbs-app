@@ -133,7 +133,7 @@ Menu.setApplicationMenu(menu);
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1500,
+    width: 1200,
     height: 900,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js')
