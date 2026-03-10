@@ -24,6 +24,12 @@
 <label>VARA Data Port:</label>
 <input id="varaDataPort"><br>
 
+<label>YAPP Receive Directory</label>
+<div class="dir-picker">
+    <input id="yappDirInput" type="text" readonly>
+    <button id="yappDirButton">Browse…</button>
+</div>
+
 <button id="saveBtn">Save</button>
 
 <script>
@@ -38,6 +44,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   varaIP.value = s.varaIP;
   varaCmdPort.value = s.varaCmdPort;
   varaDataPort.value = s.varaDataPort;
+  yappDirInput.value = s.yappReceiveDir || "";
 
   saveBtn.addEventListener('click', async () => {
     await window.settings.set({
@@ -48,10 +55,19 @@ window.addEventListener('DOMContentLoaded', async () => {
       digi2: digi2.value,
       varaIP: varaIP.value,
       varaCmdPort: Number(varaCmdPort.value),
-      varaDataPort: Number(varaDataPort.value)
+      varaDataPort: Number(varaDataPort.value),
+      yappReceiveDir: yappDirInput.value
     });
 
     window.close();
   });
+});
+
+document.getElementById("yappDirButton").addEventListener("click", async () => {
+    const dir = await window.electronAPI.pickDirectory();
+    if (dir) {
+        document.getElementById("yappDirInput").value = dir;
+        window.electronAPI.saveSetting("yappReceiveDir", dir);
+    }
 });
 </script>

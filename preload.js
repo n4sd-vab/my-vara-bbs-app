@@ -44,6 +44,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     updateAddressBookEntry: (entry) => ipcRenderer.invoke("addressbook-update", entry),
 
-    onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback())
+    onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback()),
+
+    onOpenYappReceive: (callback) => ipcRenderer.on("open-yapp-receive", () => callback()),
+
+    onOpenYappSend: (callback) => ipcRenderer.on("open-yapp-send", () => callback()),
+
+    startYappReceive: (info) => ipcRenderer.send('start-yapp-receive', info),
+
+    onYappReceiveComplete: (callback) => ipcRenderer.on("yapp-receive-complete", callback),
+    onYappProgress: (callback) => ipcRenderer.on("yapp-progress", callback),
+
+    pickDirectory: () => ipcRenderer.invoke("pick-directory"),
+    saveSetting: (key, value) => ipcRenderer.invoke("save-setting", { key, value }),
+    onYappProgress: (callback) => ipcRenderer.on("yapp-progress", callback),
+    onYappReceiveComplete: (callback) => ipcRenderer.on("yapp-receive-complete", callback)
+
 
 });

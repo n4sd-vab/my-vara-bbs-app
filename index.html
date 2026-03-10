@@ -240,6 +240,37 @@
             background: #0078ff;
             color: white;
         }
+        #yappProgressContainer {
+            width: 100%;
+            height: 12px;
+            background: #333;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        #yappProgressBar {
+            width: 0%;
+            height: 100%;
+            background: #4caf50;
+            transition: width 0.15s linear;
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #222;
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 6px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+
+        .toast.show {
+            opacity: 1;
+        }
     </style>
 </head>
 
@@ -280,6 +311,7 @@
                 style="width:100%; resize:vertical; font-family:monospace;"></textarea>
             <input id="commandInput" placeholder="Enter VARA API commands and press Enter" style="width:100%;" />
         </div>
+        <div id="yappToast" class="toast"></div>
         <!-- RECEIVED DATA ( About 30 lines) -->
         <div id="mainContent">
             <!-- LEFT: Message List -->
@@ -319,6 +351,11 @@
             const addressBookSaveBtn = document.getElementById('addressBookSaveBtn');
             const addressBookViewModal = document.getElementById('addressBookViewModal');
             const addressBookViewClose = document.getElementById('addressBookViewClose');
+            const yappReceiveModal = document.getElementById('yappReceiveModal');
+            const yappReceiveCancelBtn = document.getElementById('yappReceiveCancelBtn');
+            const yappReceiveStartBtn = document.getElementById('yappReceiveStartBtn');
+            const fileName = document.getElementById('fileName');
+            const fileDirectory = document.getElementById('fileDirectory');
             const addCallsign = document.getElementById('addCallsign');
             const addName = document.getElementById('addName');
             const addLocation = document.getElementById('addLocation');
@@ -539,6 +576,36 @@
                 attachAddressBookRowHandlers();
             });
 
+            window.electronAPI.onOpenYappReceive(async () => {
+                yappReceiveModal.style.display = "flex";
+                // optionally retrieve existing entries (for debugging / later use)
+
+            });
+
+            window.electronAPI.onYappProgress((event, { received, total }) => {
+                const pct = Math.floor((received / total) * 100);
+                document.getElementById("yappProgressBar").style.width = pct + "%";
+                document.getElementById("yappProgressText").innerText = pct + "%";
+            });
+
+            window.electronAPI.onYappReceiveComplete(() => {
+                const modal = document.getElementById("yappReceiveModal");
+                modal.style.display = "none";
+                appendCommand('info', 'YAPP file receive complete');
+            });
+
+            window.electronAPI.onYappReceiveComplete(() => {
+                const toast = document.getElementById("yappToast");
+                toast.innerText = "File received successfully";
+                toast.classList.add("show");
+
+                setTimeout(() => toast.classList.remove("show"), 4000);
+
+                // Reset progress bar
+                document.getElementById("yappProgressBar").style.width = "0%";
+                document.getElementById("yappProgressText").innerText = "0%";
+            });
+
             window.electronAPI.onOpenBbsHelp(() => {
                 document.getElementById("bbsHelpModal").style.display = "flex";
             });
@@ -621,6 +688,8 @@
                     }
                 }
             });
+
+
 
             connectBtn.addEventListener('click', async () => {
                 try {
@@ -799,6 +868,21 @@
                 addressBookViewModal.style.display = "none";
             });
 
+            yappReceiveCancelBtn.addEventListener('click', () => {
+                yappReceiveModal.style.display = "none";
+            });
+
+            
+
+            yappReceiveStartBtn.addEventListener('click', () => {
+                const filename = document.getElementById('fileName').value.trim();
+                const directory = document.getElementById('fileDirectory').value.trim();
+
+                window.electronAPI.startYappReceive({ filename, directory });
+            });
+
+
+
             bbsHelpClose.addEventListener('click', () => {
                 document.getElementById("bbsHelpModal").style.display = "none";
             });
@@ -941,6 +1025,27 @@
             <div style="text-align:right;">
                 <button id="addressBookViewClose" class="modal-btn cancel">Close</button>
             </div>
+        </div>
+    </div>
+
+    <div id="yappReceiveModal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>YAPP Receive File from BBS</h3>
+
+            <label>FileName:</label><br>
+            <input id="fileName" class="modal-input"><br>
+
+            <label>Local Directory Name:</label><br>
+            <input id="fileDirectory" class="modal-input"><br>
+
+            <div style="text-align:right;">
+                <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
+                <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
+            </div>
+            <div id="yappProgressContainer">
+                <div id="yappProgressBar"></div>
+            </div>
+            <div id="yappProgressText">0%</div>
         </div>
     </div>
 
