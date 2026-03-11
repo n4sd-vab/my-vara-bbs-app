@@ -830,6 +830,19 @@
                 appendCommand('local', `TX: R ${msgNum}`);
                 msgView.innerHTML = `<em>Loading message ${msgNum}...</em><br/>`;
 
+                // If link is down, reconnect before sending
+                if (!varaLinkUp) {
+                    appendCommand('info', 'Link is down, attempting to reconnect...');
+                    msgView.innerHTML = `<em>Reconnecting to BBS...</em><br/>`;
+                    try {
+                        await window.vara.sendCommand(`CONNECT ${appSettings.myCall} ${appSettings.bbsCall}${appSettings.digi1 ? " VIA " + appSettings.digi1 : ""}${appSettings.digi2 ? appSettings.digi2 : ""}`);
+                        appendCommand('info', 'Reconnect command sent');
+                    } catch (err) {
+                        appendCommand('error', 'Reconnect failed: ' + err.message);
+                        return;
+                    }
+                }
+
                 try {
                     await window.vara.sendData(`R ${msgNum}\r`);
                 } catch (err) {
@@ -1035,9 +1048,7 @@
             <label>FileName:</label><br>
             <input id="fileName" class="modal-input"><br>
 
-            <label>Local Directory Name:</label><br>
-            <input id="fileDirectory" class="modal-input"><br>
-
+            
             <div style="text-align:right;">
                 <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
                 <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
