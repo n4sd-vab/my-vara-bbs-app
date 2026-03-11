@@ -578,6 +578,7 @@
 
             window.electronAPI.onOpenYappReceive(async () => {
                 yappReceiveModal.style.display = "flex";
+                document.getElementById("fileDirectory").value = directory;
                 // optionally retrieve existing entries (for debugging / later use)
 
             });
@@ -1048,7 +1049,9 @@
             <label>FileName:</label><br>
             <input id="fileName" class="modal-input"><br>
 
-            
+            <label>Save Directory:</label><br>
+            <input id="fileDirectory" class="modal-input" placeholder="Select directory to save"><br>
+
             <div style="text-align:right;">
                 <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
                 <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
