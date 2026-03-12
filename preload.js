@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('settings', {
   set: (data) => ipcRenderer.invoke('settings-set', data)
 });
 
+
 contextBridge.exposeInMainWorld("electronAPI", {
     onToggleVaraConsole: (callback) =>
         ipcRenderer.on("toggle-vara-console", (_event, visible) => callback(visible)),
@@ -46,19 +47,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback()),
 
-    onOpenYappReceive: (callback) => ipcRenderer.on("open-yapp-receive", () => callback()),
-
     onOpenYappSend: (callback) => ipcRenderer.on("open-yapp-send", () => callback()),
 
     startYappReceive: (info) => ipcRenderer.send('start-yapp-receive', info),
 
-    onYappReceiveComplete: (callback) => ipcRenderer.on("yapp-receive-complete", callback),
-    onYappProgress: (callback) => ipcRenderer.on("yapp-progress", callback),
-
     pickDirectory: () => ipcRenderer.invoke("pick-directory"),
     saveSetting: (key, value) => ipcRenderer.invoke("save-setting", { key, value }),
+    getSetting: (key) => ipcRenderer.invoke("get-setting", key),
+    onOpenYappReceive: (callback) => ipcRenderer.on("open-yapp-receive", () => callback()),
     onYappProgress: (callback) => ipcRenderer.on("yapp-progress", callback),
     onYappReceiveComplete: (callback) => ipcRenderer.on("yapp-receive-complete", callback)
-
 
 });

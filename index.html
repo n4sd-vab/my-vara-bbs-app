@@ -352,6 +352,8 @@
             const addressBookViewModal = document.getElementById('addressBookViewModal');
             const addressBookViewClose = document.getElementById('addressBookViewClose');
             const yappReceiveModal = document.getElementById('yappReceiveModal');
+            const yappModalDirInput = document.getElementById('yappModalDirInput');
+            const yappReceiveDir = document.getElementById('yappReceiveDir');
             const yappReceiveCancelBtn = document.getElementById('yappReceiveCancelBtn');
             const yappReceiveStartBtn = document.getElementById('yappReceiveStartBtn');
             const fileName = document.getElementById('fileName');
@@ -385,6 +387,7 @@
             const disconnectBtn = document.getElementById('disconnectBtn');
 
             const composeSendBtn = document.getElementById('composeSendBtn');
+        
 
             console.log("Loaded settings:", appSettings);
 
@@ -576,11 +579,24 @@
                 attachAddressBookRowHandlers();
             });
 
+            document.getElementById("yappModalDirButton").addEventListener("click", async () => {
+                const dir = await window.electronAPI.pickDirectory();
+                if (dir) {
+                    document.getElementById("yappModalDirInput").value = dir;
+                    window.electronAPI.saveSetting("yappReceiveDir", dir);
+                }
+            });
+
+            window.electronAPI.getSetting("yappReceiveDir").then(dir => {
+                document.getElementById("yappModalDirInput").value = dir || "";
+            });
+
             window.electronAPI.onOpenYappReceive(async () => {
                 yappReceiveModal.style.display = "flex";
-                document.getElementById("fileDirectory").value = directory;
-                // optionally retrieve existing entries (for debugging / later use)
 
+                // Load the saved directory when the modal opens
+                const dir = await window.electronAPI.getSetting("yappReceiveDir");
+                document.getElementById("yappModalDirInput").value = dir || "";
             });
 
             window.electronAPI.onYappProgress((event, { received, total }) => {
@@ -640,21 +656,21 @@
                 }
                 // Busy
                 if (msg.includes("BUSY ON")) {
-                    statusBusy.textContent = "On";
+                    statusBusy.textContent = "ON";
                     statusBusy.style.color = "#f33";
                 }
                 if (msg.includes("BUSY OFF")) {
-                    statusBusy.textContent = "Off";
+                    statusBusy.textContent = "OFF";
                     statusBusy.style.color = "#0f0";
                 }
 
                 // PTT
                 if (msg.startsWith("PTT ON")) {
-                    statusPTT.textContent = "On";
+                    statusPTT.textContent = "ON";
                     statusPTT.style.color = "#f33";
                 }
                 if (msg.startsWith("PTT OFF")) {
-                    statusPTT.textContent = "Off";
+                    statusPTT.textContent = "OFF";
                     statusPTT.style.color = "#0f0";
                 }
 
@@ -890,7 +906,7 @@
 
             yappReceiveStartBtn.addEventListener('click', () => {
                 const filename = document.getElementById('fileName').value.trim();
-                const directory = document.getElementById('fileDirectory').value.trim();
+                const directory = document.getElementById('yappModalDirInput').value.trim();
 
                 window.electronAPI.startYappReceive({ filename, directory });
             });
@@ -1048,14 +1064,19 @@
 
             <label>FileName:</label><br>
             <input id="fileName" class="modal-input"><br>
-
-            <label>Save Directory:</label><br>
-            <input id="fileDirectory" class="modal-input" placeholder="Select directory to save"><br>
-
-            <div style="text-align:right;">
-                <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
+            
+            <label>Save to Directory</label>
+            <div class="dir-picker">
+                <input id="yappModalDirInput" type="text" readonly>
+                <button id="yappModalDirButton">Browse…</button>
+            </div>
+            
+            
+            <div style="text-align:right;">  <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
                 <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
             </div>
+
+
             <div id="yappProgressContainer">
                 <div id="yappProgressBar"></div>
             </div>

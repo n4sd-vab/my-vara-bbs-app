@@ -525,7 +525,9 @@ case "DONE":
     const path = require("path");
     //const filePath = path.join(this.dir, this.filename);
 
-    const receiveDir = settings.yappReceiveDir || "C:\\YAPP";
+    const settings = loadSettings();  // load fresh copy
+    const receiveDir = settings.yappReceiveDir || path.join(app.getPath("documents"), "YAPP");
+
     const filePath = path.join(receiveDir, this.filename);
 
     console.log("Opening file:", filePath);
@@ -615,12 +617,33 @@ ipcMain.handle('vara-disconnect', async () => {
   if (dataSocket) dataSocket.end();
 });
 
-ipcMain.handle('settings-get', () => settings);
-
-ipcMain.handle('settings-set', (_event, data) => {
-  settings = { ...settings, ...data };
-  saveSettings(settings);
+ipcMain.handle("settings-get", async () => {
+    return loadSettings();
 });
+
+ipcMain.handle("settings-set", async (_event, data) => {
+    const settings = loadSettings();
+    const newSettings = { ...settings, ...data };
+    fs.writeFileSync(settingsPath, JSON.stringify(newSettings, null, 2));
+});
+
+ipcMain.handle("get-setting", async (_event, key) => {
+    const settings = loadSettings();   // load fresh copy
+    return settings[key];
+});
+
+/*
+function saveSettings(settings) {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+}
+*/
+
+ipcMain.handle("save-setting", async (_event, { key, value }) => {
+    const settings = loadSettings();
+    settings[key] = value;
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+});
+
 
 ipcMain.on("show-message-context-menu", (event, data) => {
   const menu = new Menu();
@@ -695,6 +718,10 @@ ipcMain.handle("pick-directory", async () => {
     });
     return result.canceled ? null : result.filePaths[0];
 });
+
+//ipcMain.handle("get-setting", async (_event, key) => {
+//    return settings.get(key);
+//});
 
 
 //ipcMain.handle("addressbook-get-all", () => {
