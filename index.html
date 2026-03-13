@@ -6,7 +6,7 @@
     <title>VARA BBS Client</title>
     <style>
         body {
-            background: #f8fafc;
+            background: #d4dde7;
             font-family: sans-serif;
             margin: 0;
             padding: 0;
@@ -25,8 +25,6 @@
         td {
             padding: 2px;
         }
-
-
 
         #commandInput {
             width: 100%;
@@ -47,7 +45,7 @@
         #toolBar {
             flex: 0 0 auto;
             padding: 10px;
-            background: #eee;
+            background: #d4dde7;
             gap: 10px;
         }
 
@@ -266,11 +264,39 @@
             opacity: 0;
             transition: opacity 0.3s ease;
             pointer-events: none;
+            z-index: 20000;
         }
 
         .toast.show {
             opacity: 1;
         }
+
+        .toast.visible {
+            opacity: 1;
+        }
+
+
+        #yappFileList {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #444;
+            padding: 6px;
+            margin-bottom: 10px;
+            background: #ffffff;
+            list-style: none;
+            font-size: 14px;
+        }
+
+        #yappFileList li {
+            padding: 4px 6px;
+            cursor: pointer;
+            border-bottom: 1px solid #333;
+        }
+
+        #yappFileList li:hover {
+            background: #91dd8e;
+        }
+
     </style>
 </head>
 
@@ -352,12 +378,13 @@
             const addressBookViewModal = document.getElementById('addressBookViewModal');
             const addressBookViewClose = document.getElementById('addressBookViewClose');
             const yappReceiveModal = document.getElementById('yappReceiveModal');
+            const yappLoadFileListBtn = document.getElementById("yappLoadFileListBtn");
             const yappModalDirInput = document.getElementById('yappModalDirInput');
             const yappReceiveDir = document.getElementById('yappReceiveDir');
             const yappReceiveCancelBtn = document.getElementById('yappReceiveCancelBtn');
             const yappReceiveStartBtn = document.getElementById('yappReceiveStartBtn');
             const fileName = document.getElementById('fileName');
-            const fileDirectory = document.getElementById('fileDirectory');
+            // const fileDirectory = document.getElementById('fileDirectory');
             const addCallsign = document.getElementById('addCallsign');
             const addName = document.getElementById('addName');
             const addLocation = document.getElementById('addLocation');
@@ -445,6 +472,40 @@
                 return { msgNum, sender, subject };
             }
 
+            async function ensureBbsConnected() {
+                if (varaLinkUp) return true;
+
+                showToast("Reconnecting to BBS…");
+
+                const connectCmd =
+                    `CONNECT ${appSettings.myCall} ${appSettings.bbsCall}` +
+                    (appSettings.digi1 ? ` VIA ${appSettings.digi1}` : "") +
+                    (appSettings.digi2 ? ` ${appSettings.digi2}` : "");
+
+                appendCommand('info', 'Link is down, attempting to reconnect...');
+                msgView.innerHTML = `<em>Reconnecting to BBS...</em><br/>`;
+
+                try {
+                    await window.vara.sendCommand(connectCmd);
+                    appendCommand('info', 'Reconnect command sent');
+                } catch (err) {
+                    appendCommand('error', 'Reconnect failed: ' + err.message);
+                    showToast("Reconnect failed");
+                    return false;
+                }
+
+                // Wait for LINK UP
+                return new Promise(resolve => {
+                    const handler = ({ msg }) => {
+                        if (msg.includes("LINK UP")) {
+                            window.vara.onLog.removeListener(handler);
+                            showToast("Reconnected");
+                            resolve(true);
+                        }
+                    };
+                    window.vara.onLog(handler);
+                });
+            }
             // Handle incoming logs from main.js
 
             function setConnectedUI(connected) {
@@ -493,7 +554,18 @@
                 addressBookModal.style.display = "flex";
             }
 
+            function showToast(text) {
+                const toast = document.createElement("div");
+                toast.className = "toast";
+                toast.textContent = text;
+                document.body.appendChild(toast);
 
+                setTimeout(() => toast.classList.add("visible"), 10);
+                setTimeout(() => {
+                    toast.classList.remove("visible");
+                    setTimeout(() => toast.remove(), 300);
+                }, 2500);
+            }
 
 
             // Listen for VARA console toggle from main process
@@ -591,10 +663,41 @@
                 document.getElementById("yappModalDirInput").value = dir || "";
             });
 
+            yappLoadFileListBtn.addEventListener("click", async () => {
+                await ensureBbsConnected();
+                console.log("Renderer: Requesting YAPP file list...");
+                window.electronAPI.requestYappFileList();
+            });
+
+            window.electronAPI.onYappFileList(files => {
+                console.log("Renderer: Received file list:", files);
+
+                const list = document.getElementById("yappFileList");
+                list.innerHTML = "";
+
+                if (!files || !Array.isArray(files)) {
+                    console.log("Renderer: FILE LIST IS NOT AN ARRAY");
+                    return;
+                }
+
+                files.forEach(f => {
+                    console.log("Renderer: Adding file:", f);
+                    const li = document.createElement("li");
+                    li.textContent = `${f.name} (${f.size} bytes)`;
+                    li.addEventListener("click", () => {
+                        fileName.value = f.name;
+                    });
+                    list.appendChild(li);
+                });
+            });
+
             window.electronAPI.onOpenYappReceive(async () => {
                 yappReceiveModal.style.display = "flex";
 
-                // Load the saved directory when the modal opens
+                // Request file list from BBS when modal opens
+                window.electronAPI.requestYappFileList();
+
+                // Load the save directory when the modal opens
                 const dir = await window.electronAPI.getSetting("yappReceiveDir");
                 document.getElementById("yappModalDirInput").value = dir || "";
             });
@@ -706,8 +809,6 @@
                 }
             });
 
-
-
             connectBtn.addEventListener('click', async () => {
                 try {
                     await window.vara.connect();
@@ -818,6 +919,7 @@
             // List All (L) — goes to DATA port
             listNewBtn.addEventListener('click', async () => {
                 clearMessageWindows();
+                await ensureBbsConnected();
                 const text = "L\r";
                 appendCommand('local', 'TX: L');
                 try {
@@ -848,7 +950,9 @@
                 msgView.innerHTML = `<em>Loading message ${msgNum}...</em><br/>`;
 
                 // If link is down, reconnect before sending
-                if (!varaLinkUp) {
+                await ensureBbsConnected();
+
+               /* if (!varaLinkUp) {
                     appendCommand('info', 'Link is down, attempting to reconnect...');
                     msgView.innerHTML = `<em>Reconnecting to BBS...</em><br/>`;
                     try {
@@ -859,7 +963,7 @@
                         return;
                     }
                 }
-
+                */
                 try {
                     await window.vara.sendData(`R ${msgNum}\r`);
                 } catch (err) {
@@ -928,7 +1032,8 @@
                     appendCommand('error', 'All fields are required');
                     return;
                 }
-
+                await ensureBbsConnected();
+                /*
                 // If link is down, reconnect before sending
                 if (!varaLinkUp) {
                     appendCommand('info', 'Link is down, attempting to reconnect...');
@@ -940,7 +1045,7 @@
                         return;
                     }
                 }
-
+                */
                 // Build BBS message format
                 const cmd = (type === "P") ? `SP ${to}\r` : `SB ${to}\r`;
                 const msg =
@@ -1058,31 +1163,34 @@
         </div>
     </div>
 
-    <div id="yappReceiveModal" class="modal-overlay">
-        <div class="modal-window">
-            <h3>YAPP Receive File from BBS</h3>
+<div id="yappReceiveModal" class="modal-overlay">
+    <div class="modal-window">
+        <h3>YAPP Receive File from BBS</h3>
 
-            <label>FileName:</label><br>
-            <input id="fileName" class="modal-input"><br>
-            
-            <label>Save to Directory</label>
-            <div class="dir-picker">
-                <input id="yappModalDirInput" type="text" readonly>
-                <button id="yappModalDirButton">Browse…</button>
-            </div>
-            
-            
-            <div style="text-align:right;">  <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
-                <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
-            </div>
+        <button id="yappLoadFileListBtn" class="modal-btn small">Show File List</button>
 
+        <ul id="yappFileList"></ul>
 
-            <div id="yappProgressContainer">
-                <div id="yappProgressBar"></div>
-            </div>
-            <div id="yappProgressText">0%</div>
+        <label>File Name:</label><br>
+        <input id="fileName" class="modal-input"><br>
+
+        <label>Save to Directory</label>
+        <div class="dir-picker">
+            <input id="yappModalDirInput" type="text" readonly>
+            <button id="yappModalDirButton">Browse…</button>
         </div>
+
+        <div style="text-align:right;">
+            <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
+            <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
+        </div>
+
+        <div id="yappProgressContainer">
+            <div id="yappProgressBar"></div>
+        </div>
+        <div id="yappProgressText">0%</div>
     </div>
+</div>
 
     <div id="bbsHelpModal" class="modal-overlay">
         <div class="modal-window-2">

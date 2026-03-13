@@ -68,6 +68,8 @@ let dataSocket = null;
 let dataBuffer = "";
 let inYapp = false;   // global YAPP mode flag
 let yappReceiver = null;  // will hold YappReceiver instance during YAPP transfers
+let inFileList = false;  // flag to indicate we're currently receiving a file list from the BBS
+let fileList = [];
 
 const menuTemplate = [
   {
@@ -206,8 +208,6 @@ function initializeDatabase() {
     `);
 }
 
-
-
 app.whenReady().then(() => {
   createWindow();
 
@@ -267,6 +267,41 @@ function sendRawBytes(buffer) {
   }
 }
 
+function handleFileListText(text) {
+  console.log("YAPP FILELIST: Received text chunk:", JSON.stringify(text));
+
+  const lines = text.split("\r");
+
+  for (const line of lines) {
+    console.log("YAPP FILELIST: Line:", JSON.stringify(line));
+
+    // Detect FILES entries
+    const fileMatch = line.match(/^(.+)\s+(\d+)$/);
+    if (fileMatch) {
+      const name = fileMatch[1].trim();
+      const size = parseInt(fileMatch[2], 10);
+
+      console.log("YAPP FILELIST: MATCHED FILE ENTRY:", name, size);
+      fileList.push({ name, size });
+      continue;
+    }
+
+    // End of list
+    if (line.trim() === "" || line.includes("BPQ") || line.includes(">")) {
+      console.log("YAPP FILELIST: END OF LIST DETECTED");
+      console.log("YAPP FILELIST: Final list:", fileList);
+
+      inFileList = false;
+      mainWindow.webContents.send("yapp-file-list", fileList);
+
+      fileList = [];
+      return;
+    }
+  }
+}
+
+
+
 /**
  * Connect to VARA FM command and data ports
  */
@@ -310,11 +345,7 @@ ipcMain.handle('vara-connect', async () => {
       done();
     });
 
-
-
-
     dataSocket.on('data', (data) => {
-
       console.log("RAW DATA:", data);
       console.log("HEX:", data.toString('hex'));
       console.log("BYTES:", [...data]);
@@ -331,7 +362,12 @@ ipcMain.handle('vara-connect', async () => {
           return;   // IMPORTANT: do NOT fall through to text logic
         }
 
-        // 2. NORMAL BBS TEXT MODE
+        // 2. FILE LIST MODE
+        if (inFileList) {
+            handleFileListText(data.toString());
+            return;   // IMPORTANT: do NOT fall through to normal text logic
+        }
+        // 3. NORMAL BBS TEXT MODE
         dataBuffer += data.toString();   // accumulate
 
         let parts = dataBuffer.split('\r');
@@ -632,11 +668,6 @@ ipcMain.handle("get-setting", async (_event, key) => {
     return settings[key];
 });
 
-/*
-function saveSettings(settings) {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-}
-*/
 
 ipcMain.handle("save-setting", async (_event, { key, value }) => {
     const settings = loadSettings();
@@ -682,6 +713,18 @@ ipcMain.on('start-yapp-receive', async (event, info) => {
   }
 });
 
+ipcMain.on("yapp-request-file-list", () => {
+    
+    console.log("YAPP: Requesting FILES list...");
+    if (dataSocket) {
+        inFileList = true;
+        fileList = [];
+        console.log("YAPP: inFileList = true, sending FILES");
+        dataSocket.write("FILES\r");
+    } else {
+        console.log("YAPP: dataSocket is NULL");
+    }
+});
 
 // Address book IPC handlers
 ipcMain.handle('address-book-save', (_event, entry) => {

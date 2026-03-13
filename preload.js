@@ -51,6 +51,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     startYappReceive: (info) => ipcRenderer.send('start-yapp-receive', info),
 
+    requestYappFileList: () => ipcRenderer.send('yapp-request-file-list'),
+    onYappFileList: (callback) => ipcRenderer.on('yapp-file-list', (_e, files) => callback(files)),
+
     pickDirectory: () => ipcRenderer.invoke("pick-directory"),
     saveSetting: (key, value) => ipcRenderer.invoke("save-setting", { key, value }),
     getSetting: (key) => ipcRenderer.invoke("get-setting", key),
