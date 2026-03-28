@@ -110,6 +110,7 @@
             margin: 0 5px;
             /* Space on either side of the separator */
         }
+
         .send-row {
             display: flex;
             align-items: center;
@@ -223,35 +224,66 @@
             cursor: pointer;
             margin-left: 8px;
             font-size: 14px;
+            transition-duration: 0.4s;
         }
 
         .modal-btn.cancel {
             background: #ccc;
+        }
+        .modal-btn.cancel:hover {
+            background: #999;
         }
 
         .modal-btn.send {
             background: #0078ff;
             color: white;
         }
+        .modal-btn.send:hover {
+            background: #005bb5;
+        }
 
         .modal-btn.save {
             background: #0078ff;
             color: white;
         }
-        #yappProgressContainer {
-            width: 100%;
-            height: 12px;
-            background: #333;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 10px;
+        .modal-btn.save:hover {
+            background: #005bb5;
         }
-        #yappProgressBar {
+
+        /* Containers for both Send and Receive */
+        #yappSendProgressContainer,
+        #yappRecvProgressContainer {
+            width: 100%;
+            background: #cccccc;
+            border-radius: 4px;
+            margin-top: 10px;
+            padding: 0;
+            /* ensure no weird spacing */
+            height: 16px;
+            /* give the bar a real height */
+            overflow: hidden;
+            /* clip the green bar cleanly */
+        }
+
+        /* The actual green bars */
+        #yappSendProgressBar,
+        #yappRecvProgressBar {
             width: 0%;
             height: 100%;
+            /* fill the container vertically */
             background: #4caf50;
-            transition: width 0.15s linear;
+            transition: width 0.2s linear;
         }
+
+        /* Text labels */
+        #yappSendProgressText,
+        #yappRecvProgressText {
+            margin-top: 4px;
+            font-size: 14px;
+            text-align: right;
+            color: #333;
+        }
+
         .toast {
             position: fixed;
             bottom: 20px;
@@ -296,7 +328,6 @@
         #yappFileList li:hover {
             background: #91dd8e;
         }
-
     </style>
 </head>
 
@@ -322,7 +353,7 @@
         color: #0f0;
         font-family: monospace;
         ">
-            <div>VARA: <span class="fixed-width" id="statusText" style="color: #f33;">Disconnected</span></div>
+            <div>VARA: <span class="fixed-width" id="statusVara" style="color: #f33;">Disconnected</span></div>
             <div>LINK: <span class="fixed-width" id="statusLink" style="color: #f33;">Down</span></div>
             <div>BUSY: <span class="fixed-width" id="statusBusy">Off</span></div>
             <div>PTT: <span class="fixed-width" id="statusPTT">Off</span></div>
@@ -359,7 +390,9 @@
     </div>
     <script>
         window.addEventListener('DOMContentLoaded', async () => {
-            let varaLinkUp = false;
+            let bbsLinkUp = false;
+            let connected = false;
+            let bbsPromptReady = false;
 
             // Load settings ONCE
             const appSettings = await window.settings.get();
@@ -377,14 +410,29 @@
             const addressBookSaveBtn = document.getElementById('addressBookSaveBtn');
             const addressBookViewModal = document.getElementById('addressBookViewModal');
             const addressBookViewClose = document.getElementById('addressBookViewClose');
+
             const yappReceiveModal = document.getElementById('yappReceiveModal');
             const yappLoadFileListBtn = document.getElementById("yappLoadFileListBtn");
             const yappModalDirInput = document.getElementById('yappModalDirInput');
             const yappReceiveDir = document.getElementById('yappReceiveDir');
             const yappReceiveCancelBtn = document.getElementById('yappReceiveCancelBtn');
             const yappReceiveStartBtn = document.getElementById('yappReceiveStartBtn');
+            const yappRecvProgressBar = document.getElementById("yappRecvProgressBar");
+            const yappRecvProgressText = document.getElementById("yappRecvProgressText");
             const fileName = document.getElementById('fileName');
             // const fileDirectory = document.getElementById('fileDirectory');
+
+            const yappSendModal = document.getElementById('yappSendModal');
+            const yappModalFileInput = document.getElementById('yappModalFileInput');
+            const yappSendFile = document.getElementById('yappSendFile');
+            const yappSendCancelBtn = document.getElementById('yappSendCancelBtn');
+            const yappSendStartBtn = document.getElementById('yappSendStartBtn');
+            const yappSendProgressBar = document.getElementById("yappSendProgressBar");
+            const yappSendProgressText = document.getElementById("yappSendProgressText");
+
+
+
+
             const addCallsign = document.getElementById('addCallsign');
             const addName = document.getElementById('addName');
             const addLocation = document.getElementById('addLocation');
@@ -403,18 +451,18 @@
             const rxArea = document.getElementById('rxArea');
             const txInput = document.getElementById('txInput');
 
-            const statusConn = document.getElementById('statusConn');
+            //const statusConn = document.getElementById('statusConn');
             const statusLink = document.getElementById('statusLink');
             const statusBusy = document.getElementById('statusBusy');
             const statusPTT = document.getElementById('statusPTT');
             const statusSNR = document.getElementById('statusSNR');
             const statusRate = document.getElementById('statusRate');
 
-            const statusText = document.getElementById('statusText');
+            const statusVara = document.getElementById('statusVara');
             const disconnectBtn = document.getElementById('disconnectBtn');
 
             const composeSendBtn = document.getElementById('composeSendBtn');
-        
+
 
             console.log("Loaded settings:", appSettings);
 
@@ -439,7 +487,7 @@
 
             function formatBbsLine(line) {
                 const parts = line.split(/\s+/);
-                
+
                 const msgNum = parts[0] || "";
                 const date = (parts[1] || "");
                 const status = (parts[2] || "");
@@ -449,7 +497,7 @@
                 const from = (parts[6] || "").padEnd(7);
                 const subject = parts.slice(7).join(" ");
 
-                const paddedLine = msgNum.padEnd(5) + date + " " + status + size + " " +to + at + from + subject;
+                const paddedLine = msgNum.padEnd(5) + date + " " + status + size + " " + to + at + from + subject;
 
                 return `
                 <div class="msgRow" data-msg="${msgNum}">${paddedLine}</div>
@@ -473,7 +521,10 @@
             }
 
             async function ensureBbsConnected() {
-                if (varaLinkUp) return true;
+                console.log("BBS Link Status:", bbsLinkUp, "BBS prompt ready:", bbsPromptReady);
+
+                // Already connected and ready
+                if (bbsLinkUp && bbsPromptReady) return true;
 
                 showToast("Reconnecting to BBS…");
 
@@ -482,30 +533,41 @@
                     (appSettings.digi1 ? ` VIA ${appSettings.digi1}` : "") +
                     (appSettings.digi2 ? ` ${appSettings.digi2}` : "");
 
-                appendCommand('info', 'Link is down, attempting to reconnect...');
-                msgView.innerHTML = `<em>Reconnecting to BBS...</em><br/>`;
+                // Reset state before reconnect
+                bbsPromptReady = false;
+                bbsLinkUp = false;
 
-                try {
-                    await window.vara.sendCommand(connectCmd);
-                    appendCommand('info', 'Reconnect command sent');
-                } catch (err) {
-                    appendCommand('error', 'Reconnect failed: ' + err.message);
-                    showToast("Reconnect failed");
-                    return false;
-                }
+                await window.vara.sendCommand(connectCmd);
 
-                // Wait for LINK UP
                 return new Promise(resolve => {
-                    const handler = ({ msg }) => {
-                        if (msg.includes("LINK UP")) {
-                            window.vara.onLog.removeListener(handler);
-                            showToast("Reconnected");
-                            resolve(true);
+
+                    const listener = window.vara.onLog(({ msg }) => {
+
+                        const lines = msg.split(/\r\n|\r|\n/).filter(l => l.trim());
+
+                        for (const line of lines) {
+
+                            if (/^\s*CONNECTED\s/.test(line)) {
+                                bbsLinkUp = true;
+                            }
+
+                            if (bbsLinkUp && /^de\s+[A-Z0-9\-]+>/.test(line)) {
+                                window.vara.removeLogListener(listener);
+                                bbsPromptReady = true;
+                                showToast("Reconnected");
+                                resolve(true);
+                                return;
+                            }
                         }
-                    };
-                    window.vara.onLog(handler);
+                    });
                 });
             }
+
+            async function sendBbsCommand(cmd) {
+                await ensureBbsConnected();
+                window.electronAPI.sendToBbs(cmd);
+            }
+
             // Handle incoming logs from main.js
 
             function setConnectedUI(connected) {
@@ -518,9 +580,10 @@
                 listBullBtn.disabled = !connected;
                 listWxBtn.disabled = !connected;
                 listNewBtn.disabled = !connected;
+                sendBtn.disabled = !connected;
 
-                statusText.textContent = connected ? "Connected" : "Disconnected";
-                statusText.style.color = connected ? "#0f0" : "#f33";
+                statusVara.textContent = connected ? "Connected" : "Disconnected";
+                statusVara.style.color = connected ? "#0f0" : "#f33";
             }
             // Attach handlers to Edit/Delete buttons in address book view
             function attachAddressBookRowHandlers() {
@@ -553,7 +616,34 @@
 
                 addressBookModal.style.display = "flex";
             }
+            function resetYappSendModal() {
+                // Show file picker
+                document.getElementById("yappPickerSection").style.display = "block";
 
+                // Hide progress section
+                document.getElementById("yappSendProgressSection").style.display = "none";
+
+                // Reset progress bar
+                document.getElementById("yappSendProgressBar").style.width = "0%";
+                document.getElementById("yappSendProgressText").innerText = "0%";
+
+                // Clear file path
+                document.getElementById("yappModalSendFile").value = "";
+            }
+            function resetYappRecvModal() {
+                // Show file picker
+                document.getElementById("yappFileListSection").style.display = "block";
+
+                // Hide progress section
+                document.getElementById("yappRecvProgressSection").style.display = "none";
+
+                // Reset progress bar
+                document.getElementById("yappRecvProgressBar").style.width = "0%";
+                document.getElementById("yappRecvProgressText").innerText = "0%";
+
+                // Clear file path
+                //document.getElementById("yappModalSendFile").value = "";
+            }
             function showToast(text) {
                 const toast = document.createElement("div");
                 toast.className = "toast";
@@ -573,6 +663,7 @@
                 const section = document.getElementById("varaConsoleSection");
                 section.style.display = visible ? "block" : "none";
             });
+
 
             const cancelBtn = document.getElementById("addressBookCancelBtn");
             // const saveBtn = document.getElementById("addressBookSaveBtn");
@@ -681,7 +772,7 @@
                 }
 
                 files.forEach(f => {
-                    console.log("Renderer: Adding file:", f);
+                    //console.log("Renderer: Adding file:", f);
                     const li = document.createElement("li");
                     li.textContent = `${f.name} (${f.size} bytes)`;
                     li.addEventListener("click", () => {
@@ -691,41 +782,136 @@
                 });
             });
 
+          
             window.electronAPI.onOpenYappReceive(async () => {
                 yappReceiveModal.style.display = "flex";
 
                 // Request file list from BBS when modal opens
-                window.electronAPI.requestYappFileList();
+                // window.electronAPI.requestYappFileList();
 
                 // Load the save directory when the modal opens
                 const dir = await window.electronAPI.getSetting("yappReceiveDir");
                 document.getElementById("yappModalDirInput").value = dir || "";
             });
 
-            window.electronAPI.onYappProgress((event, { received, total }) => {
-                const pct = Math.floor((received / total) * 100);
-                document.getElementById("yappProgressBar").style.width = pct + "%";
-                document.getElementById("yappProgressText").innerText = pct + "%";
-            });
-
             window.electronAPI.onYappReceiveComplete(() => {
-                const modal = document.getElementById("yappReceiveModal");
-                modal.style.display = "none";
-                appendCommand('info', 'YAPP file receive complete');
+                setTimeout(() => {
+                    resetYappRecvModal();
+
+                    // Close modal
+                    const modal = document.getElementById("yappReceiveModal");
+                    modal.style.display = "none";
+
+                    // Log
+                    appendCommand('info', 'YAPP file receive complete');
+
+                    // Toast
+                    const toast = document.getElementById("yappToast");
+                    toast.innerText = "File received successfully";
+                    toast.classList.add("show");
+                    setTimeout(() => toast.classList.remove("show"), 4000);
+
+                    // Reset progress bar
+                    document.getElementById("yappRecvProgressBar").style.width = "0%";
+                    document.getElementById("yappRecvProgressText").innerText = "0%";
+                }, 500); // 300–500ms is perfect
             });
 
-            window.electronAPI.onYappReceiveComplete(() => {
-                const toast = document.getElementById("yappToast");
-                toast.innerText = "File received successfully";
-                toast.classList.add("show");
-
-                setTimeout(() => toast.classList.remove("show"), 4000);
-
-                // Reset progress bar
-                document.getElementById("yappProgressBar").style.width = "0%";
-                document.getElementById("yappProgressText").innerText = "0%";
+            // ------------------------------------------------------------
+            // OPEN YAPP SEND MODAL
+            // ------------------------------------------------------------
+            window.electronAPI.onOpenYappSend(() => {
+                const modal = document.getElementById("yappSendModal");
+                modal.style.display = "flex";
             });
 
+            // ------------------------------------------------------------
+            // FILE PICKER BUTTON
+            // ------------------------------------------------------------
+            document.getElementById("yappModalSendFileButton").addEventListener("click", async () => {
+                const filePath = await window.electronAPI.pickFile();
+                if (filePath) {
+                    document.getElementById("yappModalSendFile").value = filePath;
+                }
+            });
+
+            // ------------------------------------------------------------
+            // START SEND BUTTON
+            // ------------------------------------------------------------
+            document.getElementById("yappSendStartBtn").addEventListener("click", async () => {
+                const filePath = document.getElementById("yappModalSendFile").value;
+
+                if (!filePath) {
+                    appendCommand("error", "No file selected for YAPP send");
+                    return;
+                }
+
+                // Switch modal to progress mode
+                document.getElementById("yappPickerSection").style.display = "none";
+                document.getElementById("yappSendProgressSection").style.display = "block";
+
+                const fileBytes = await window.electronAPI.sendYappFile(filePath);
+                if (!fileBytes) {
+                    appendCommand("error", "Failed to load file for YAPP send");
+                    return;
+                }
+
+                const fileName = filePath.split(/[/\\]/).pop();
+                const fileSize = fileBytes.length;
+
+                window.electronAPI.startYappSend({
+                    fileName,
+                    fileSize,
+                    fileBytes
+                });
+            });
+
+            // ------------------------------------------------------------
+            // PROGRESS UPDATES (new version with percent)
+            // ------------------------------------------------------------
+            window.electronAPI.onYappRecvProgress((event, { received, total, percent }) => {
+                const pct = percent + "%";
+                console.log("Receiver progress:", pct);
+
+                document.getElementById("yappRecvProgressBar").style.width = pct;
+                document.getElementById("yappRecvProgressText").innerText = pct;
+            });
+
+            window.electronAPI.onYappSendProgress((event, { sent, total, percent }) => {
+                const pct = percent + "%";
+
+                console.log("Sender progress:", pct);
+
+                const bar = document.getElementById("yappSendProgressBar");
+                const text = document.getElementById("yappSendProgressText");
+
+                bar.style.width = pct;
+                text.innerText = pct;
+            });
+
+            // ------------------------------------------------------------
+            // SEND COMPLETE
+            // ------------------------------------------------------------
+            window.electronAPI.onYappSendComplete(() => {
+                // Let the final progress update paint
+                setTimeout(() => {
+                    resetYappSendModal();
+                    document.getElementById("yappSendModal").style.display = "none";
+
+
+                    const toast = document.getElementById("yappToast");
+                    toast.innerText = "File sent successfully";
+                    toast.classList.add("show");
+                    setTimeout(() => toast.classList.remove("show"), 4000);
+
+                    // Reset progress bar
+                    document.getElementById("yappSendProgressBar").style.width = "0%";
+                    document.getElementById("yappSendProgressText").innerText = "0%";
+                }, 500); // 300–500ms is perfect
+            });
+
+            // -------------------------------------------------------------
+            // BBS Help Modal
             window.electronAPI.onOpenBbsHelp(() => {
                 document.getElementById("bbsHelpModal").style.display = "flex";
             });
@@ -733,81 +919,106 @@
 
             //  
             // Listen for message context menu events
-            //   
+            // 
 
             window.vara.onLog(({ type, msg }) => {
                 appendCommand(type, msg);
 
+                // Split into individual VARA/BPQ lines
+                const lines = msg.split(/\r\n|\r|\n/).filter(l => l.trim().length > 0);
+
+                for (const line of lines) {
+                    handleVaraLine(type, line.trim());
+                }
+            });
+
+            function handleVaraLine(type, line) {
+
                 // Connection state
-                if (msg.startsWith("Connected to VARA")) {
-                    setConnectedUI(true)
-                    statusConn.textContent = "Connected";
-                    statusConn.style.color = "#0f0";
+                if (line.startsWith("Connected to VARA")) {
+                    setConnectedUI(true);
+                    statusVara.textContent = "Connected";
+                    statusVara.style.color = "#0f0";
                 }
-                if (msg.includes("socket closed")) {
-                    setConnectedUI(false)
-                    statusConn.textContent = "Disconnected";
-                    statusConn.style.color = "#f33";
+
+                if (line.includes("socket closed")) {
+                    setConnectedUI(false);
+                    statusVara.textContent = "Disconnected";
+                    statusVara.style.color = "#f33";
                 }
-                if (msg.includes("CONNECTED")) {
+
+                // RF link up
+                if (/^\s*CONNECTED\s/.test(line)) {
+                    bbsLinkUp = true;
                     statusLink.textContent = "BBS Link Up";
                     statusLink.style.color = "#0f0";
+                    console.log("BBS link is up");
                 }
-                if (msg.includes("DISCONNECTED")) {
+
+                // RF link down
+                if (line.includes("DISCONNECTED")) {
+                    bbsLinkUp = false;
+                    bbsPromptReady = false;
                     statusLink.textContent = "BBS Link Down";
                     statusLink.style.color = "#f33";
+                    console.log("BBS link is down");
                 }
+
+                // BPQ prompt
+                if (/^de\s+[A-Z0-9\-]+>/.test(line)) {
+                    bbsPromptReady = true;
+                    console.log("BBS prompt detected");
+                }
+
                 // Busy
-                if (msg.includes("BUSY ON")) {
+                if (line === "BUSY ON") {
                     statusBusy.textContent = "ON";
                     statusBusy.style.color = "#f33";
                 }
-                if (msg.includes("BUSY OFF")) {
+
+                if (line === "BUSY OFF") {
                     statusBusy.textContent = "OFF";
                     statusBusy.style.color = "#0f0";
                 }
 
                 // PTT
-                if (msg.startsWith("PTT ON")) {
+                if (line === "PTT ON") {
                     statusPTT.textContent = "ON";
                     statusPTT.style.color = "#f33";
                 }
-                if (msg.startsWith("PTT OFF")) {
+
+                if (line === "PTT OFF") {
                     statusPTT.textContent = "OFF";
                     statusPTT.style.color = "#0f0";
                 }
 
-                // SNR
-                if (msg.startsWith("SN")) {
-                    const snr = msg.replace("SNR", "").split('\r')[0];
+                // SNR / BITRATE
+                if (line.startsWith("SN")) {
+                    const snr = line.replace("SN", "").trim();
                     statusSNR.textContent = snr;
-                    const rate = msg.replace("BITRATE", "").split('\r')[1];
+                }
+
+                if (line.startsWith("BITRATE")) {
+                    const rate = line.replace("BITRATE", "").trim();
                     statusRate.textContent = rate;
                 }
 
-                // Bitrate
-                if (msg.startsWith("BITRATE")) {
-                    const rate = msg.replace("BITRATE", "").split('\r')[0];
-                    statusRate.textContent = rate;
-                }
-
-                if (msg.includes("CONNECTED")) varaLinkUp = true;
-                if (msg.includes("DISCONNECTED")) varaLinkUp = false;
-
-
-                // existing data routing logic...
-                if (type === 'data') {
+                // Data routing
+                if (type === "data") {
                     const msgListPattern = /^\s*\d+\s+\d{1,2}-[A-Za-z]{3}\s+[A-Z$]{1,3}\s+\d+/;
 
-                    if (msgListPattern.test(msg)) {
-                        msgList.innerHTML += formatBbsLine(msg);
+                    if (msgListPattern.test(line)) {
+                        msgList.innerHTML += formatBbsLine(line);
                         msgList.scrollTop = msgList.scrollHeight;
                     } else {
-                        msgView.innerHTML += msg + "<br>";
+                        msgView.innerHTML += line + "<br>";
                         msgView.scrollTop = msgView.scrollHeight;
                     }
                 }
-            });
+            }
+
+
+
 
             connectBtn.addEventListener('click', async () => {
                 try {
@@ -846,7 +1057,7 @@
                     txInput.value = '';
 
                     try {
-                        await window.vara.sendData(text + "\r");
+                        await sendBbsCommand(text);
                     } catch (err) {
                         appendCommand('error', 'Send data failed: ' + err.message);
                     }
@@ -865,9 +1076,9 @@
             });
             disconnectBbsBtn.addEventListener('click', async () => {
                 const cmd = `B\r`;
-                appendCommand('local', '> ' + cmd);
+                appendCommand('local', '> ' + 'B');
                 try {
-                    await window.vara.sendData(cmd);
+                    await sendBbsCommand("B");
                 } catch (err) {
                     appendCommand('error', 'Disconnect BBS failed: ' + err.message);
                 }
@@ -882,24 +1093,23 @@
                 }
             });
 
-            // List Mine (LM) — goes to DATA port
-            listMineBtn.addEventListener('click', async () => {
+            // List Mine (LM) updated to use sendBbsCommand helper which ensures BBS connection and routes through main process
+
+            listMineBtn.addEventListener("click", async () => {
                 clearMessageWindows();
-                const text = "LM\r";
-                appendCommand('local', 'TX: LM');
+                appendCommand("local", "TX: LM");
                 try {
-                    await window.vara.sendData(text);
+                    await sendBbsCommand("LM");
                 } catch (err) {
-                    appendCommand('error', 'List Mine failed: ' + err.message);
+                    appendCommand("error", "List Mine failed: " + err.message);
                 }
             });
 
             listBullBtn.addEventListener('click', async () => {
                 clearMessageWindows();
-                const text = "LB\r";
                 appendCommand('local', 'TX: LB');
                 try {
-                    await window.vara.sendData(text);
+                    await sendBbsCommand("LB");
                 } catch (err) {
                     appendCommand('error', 'List Bulletins failed: ' + err.message);
                 }
@@ -907,23 +1117,20 @@
 
             listWxBtn.addEventListener('click', async () => {
                 clearMessageWindows();
-                const text = "L> WX\r";
                 appendCommand('local', 'TX: LW');
                 try {
-                    await window.vara.sendData(text);
+                    await sendBbsCommand("L> WX");
                 } catch (err) {
                     appendCommand('error', 'List Weather failed: ' + err.message);
                 }
             });
 
-            // List All (L) — goes to DATA port
+            // List All (L)
             listNewBtn.addEventListener('click', async () => {
                 clearMessageWindows();
-                await ensureBbsConnected();
-                const text = "L\r";
                 appendCommand('local', 'TX: L');
                 try {
-                    await window.vara.sendData(text);
+                    await sendBbsCommand("L");
                 } catch (err) {
                     appendCommand('error', 'List All failed: ' + err.message);
                 }
@@ -943,29 +1150,12 @@
 
                 row.scrollIntoView({ block: "nearest" });
 
-
                 const msgNum = row.dataset.msg;
-
                 appendCommand('local', `TX: R ${msgNum}`);
                 msgView.innerHTML = `<em>Loading message ${msgNum}...</em><br/>`;
 
-                // If link is down, reconnect before sending
-                await ensureBbsConnected();
-
-               /* if (!varaLinkUp) {
-                    appendCommand('info', 'Link is down, attempting to reconnect...');
-                    msgView.innerHTML = `<em>Reconnecting to BBS...</em><br/>`;
-                    try {
-                        await window.vara.sendCommand(`CONNECT ${appSettings.myCall} ${appSettings.bbsCall}${appSettings.digi1 ? " VIA " + appSettings.digi1 : ""}${appSettings.digi2 ? appSettings.digi2 : ""}`);
-                        appendCommand('info', 'Reconnect command sent');
-                    } catch (err) {
-                        appendCommand('error', 'Reconnect failed: ' + err.message);
-                        return;
-                    }
-                }
-                */
                 try {
-                    await window.vara.sendData(`R ${msgNum}\r`);
+                    await sendBbsCommand(`R ${msgNum}`);
                 } catch (err) {
                     appendCommand('error', 'Read message failed: ' + err.message);
                 }
@@ -1003,24 +1193,29 @@
             });
 
             yappReceiveCancelBtn.addEventListener('click', () => {
+                resetYappRecvModal();
                 yappReceiveModal.style.display = "none";
             });
 
-            
+            yappSendCancelBtn.addEventListener("click", () => {
+                resetYappSendModal();
+                yappSendModal.style.display = "none";
+            });
 
             yappReceiveStartBtn.addEventListener('click', () => {
                 const filename = document.getElementById('fileName').value.trim();
                 const directory = document.getElementById('yappModalDirInput').value.trim();
 
+                // Switch modal to progress mode
+                document.getElementById("yappFileListSection").style.display = "none";
+                document.getElementById("yappRecvProgressSection").style.display = "block";
+
                 window.electronAPI.startYappReceive({ filename, directory });
             });
-
-
 
             bbsHelpClose.addEventListener('click', () => {
                 document.getElementById("bbsHelpModal").style.display = "none";
             });
-
 
             composeSendBtn.addEventListener('click', async () => {
                 const to = document.getElementById('composeTo').value.trim();
@@ -1032,10 +1227,10 @@
                     appendCommand('error', 'All fields are required');
                     return;
                 }
-                await ensureBbsConnected();
+                //await ensureBbsConnected();
                 /*
                 // If link is down, reconnect before sending
-                if (!varaLinkUp) {
+                if (!bbsLinkUp) {
                     appendCommand('info', 'Link is down, attempting to reconnect...');
                     try {
                         await window.vara.sendCommand(`CONNECT ${appSettings.myCall} ${appSettings.bbsCall}${appSettings.digi1 ? " VIA " + appSettings.digi1 : ""}${appSettings.digi2 ? appSettings.digi2 : ""}`);
@@ -1057,7 +1252,7 @@
                 appendCommand('local', 'TX: Sending message');
 
                 try {
-                    await window.vara.sendData(msg);
+                    await sendBbsCommand(msg);
                     composeModal.style.display = "none";
 
                     composeTo.value = "";
@@ -1084,7 +1279,7 @@
                 }
             });
         });
-
+        console.log("RENDERER LOADED");
     </script>
 
     <div id="composeModal" class="modal-overlay">
@@ -1163,34 +1358,63 @@
         </div>
     </div>
 
-<div id="yappReceiveModal" class="modal-overlay">
-    <div class="modal-window">
-        <h3>YAPP Receive File from BBS</h3>
-
-        <button id="yappLoadFileListBtn" class="modal-btn small">Show File List</button>
-
-        <ul id="yappFileList"></ul>
-
-        <label>File Name:</label><br>
-        <input id="fileName" class="modal-input"><br>
-
-        <label>Save to Directory</label>
-        <div class="dir-picker">
-            <input id="yappModalDirInput" type="text" readonly>
-            <button id="yappModalDirButton">Browse…</button>
+    <div id="yappReceiveModal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>YAPP - Receive File from BBS</h3>
+            <div id="yappFileListSection">
+                <button type="button" id="yappLoadFileListBtn" class="modal-btn">Get File List</button>
+            
+                <ul id="yappFileList"></ul>
+            
+                <label>File Name:</label><br>
+                <input id="fileName" class="modal-input"><br>
+            
+                <label>Save to Directory</label>
+                <div class="dir-picker">
+                    <input id="yappModalDirInput" type="text" readonly>
+                    <button id="yappModalDirButton">Browse…</button>
+                </div>
+            
+                <div style="text-align:right;">
+                    <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
+                    <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
+                </div>
+            </div>
+            <div id="yappRecvProgressSection" style="display:none;">
+                <div id="yappRecvProgressContainer">
+                    <div id="yappRecvProgressText">0%</div>
+                    <div id="yappRecvProgressBar"></div>
+                </div>
+            </div>
         </div>
-
-        <div style="text-align:right;">
-            <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
-            <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
-        </div>
-
-        <div id="yappProgressContainer">
-            <div id="yappProgressBar"></div>
-        </div>
-        <div id="yappProgressText">0%</div>
     </div>
-</div>
+
+    <div id="yappSendModal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>YAPP - Send File to BBS</h3>
+
+            <div id="yappPickerSection">
+                <label>Choose File To Send</label>
+                <div class="file-picker">
+                    <input id="yappModalSendFile" type="text" readonly>
+                    <button id="yappModalSendFileButton">Browse…</button>
+                </div>
+
+                <div style="text-align:right;">
+                    <button id="yappSendCancelBtn" class="modal-btn cancel">Cancel</button>
+                    <button id="yappSendStartBtn" class="modal-btn send">Start</button>
+                </div>
+            </div>
+
+            <div id="yappSendProgressSection" style="display:none;">
+                <div id="yappSendProgressContainer">
+                    <div id="yappSendProgressText"></div>
+                    <div id="yappSendProgressBar"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
 
     <div id="bbsHelpModal" class="modal-overlay">
         <div class="modal-window-2">
@@ -1237,9 +1461,9 @@ X - Toggle Expert Mode
 YAPP - Download file from BBS using YAPP protocol
 
             </pre>
-        <button id="bbsHelpClose">Close</button>
+            <button id="bbsHelpClose">Close</button>
+        </div>
     </div>
-</div>
 
 </body>
 

@@ -1,12 +1,21 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld('vara', {
     connect: () => ipcRenderer.invoke('vara-connect'),
     disconnect: () => ipcRenderer.invoke('vara-disconnect'),
     sendCommand: (line) => ipcRenderer.invoke('vara-send-command', line),
     sendData: (text) => ipcRenderer.invoke('vara-send-data', text),
-    onLog: (callback) => ipcRenderer.on('log', (_event, data) => callback(data))
+    //sendToBbs: (cmd) => ipcRenderer.send("bbs-send", cmd),
+    onLog: (callback) => {
+        const listener = (_event, data) => callback(data);
+        ipcRenderer.on("log", listener);
+        return listener; // return the actual listener so renderer can remove it
+    },
+    removeLogListener: (listener) => {
+        ipcRenderer.removeListener("log", listener);
+    }
 });
+
 
 contextBridge.exposeInMainWorld('settings', {
   get: () => ipcRenderer.invoke('settings-get'),
@@ -15,11 +24,14 @@ contextBridge.exposeInMainWorld('settings', {
 
 
 contextBridge.exposeInMainWorld("electronAPI", {
+
     onToggleVaraConsole: (callback) =>
         ipcRenderer.on("toggle-vara-console", (_event, visible) => callback(visible)),
 
     showMessageContextMenu: (data) =>
         ipcRenderer.send("show-message-context-menu", data),
+
+    sendToBbs: (cmd) => ipcRenderer.send("bbs-send", cmd),
 
     onReplyToSender: (callback) =>
         ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),
@@ -47,18 +59,31 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback()),
 
-    onOpenYappSend: (callback) => ipcRenderer.on("open-yapp-send", () => callback()),
-
     startYappReceive: (info) => ipcRenderer.send('start-yapp-receive', info),
+
+    startYappSend: (info) => ipcRenderer.send("yapp-start-send", info),
 
     requestYappFileList: () => ipcRenderer.send('yapp-request-file-list'),
     onYappFileList: (callback) => ipcRenderer.on('yapp-file-list', (_e, files) => callback(files)),
 
     pickDirectory: () => ipcRenderer.invoke("pick-directory"),
+    
     saveSetting: (key, value) => ipcRenderer.invoke("save-setting", { key, value }),
     getSetting: (key) => ipcRenderer.invoke("get-setting", key),
+
     onOpenYappReceive: (callback) => ipcRenderer.on("open-yapp-receive", () => callback()),
-    onYappProgress: (callback) => ipcRenderer.on("yapp-progress", callback),
-    onYappReceiveComplete: (callback) => ipcRenderer.on("yapp-receive-complete", callback)
+    onYappRecvProgress: (callback) => ipcRenderer.on("yapp-recv-progress", callback),
+    onYappReceiveComplete: (callback) => ipcRenderer.on("yapp-receive-complete", callback),
+
+    pickFile: () => ipcRenderer.invoke("pick-file"),
+    onOpenYappSend: (callback) => ipcRenderer.on("open-yapp-send", callback),
+    onYappSendComplete: (callback) => ipcRenderer.on("yapp-send-complete", callback),
+    sendYappFile: (filePath) => ipcRenderer.invoke("yapp-send-file", filePath),
+
+    onYappSendProgress: (callback) =>
+        ipcRenderer.on("yapp-send-progress", (event, data) => callback(data)),
+
+    
 
 });
+console.log("PRELOAD LOADED");
