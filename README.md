@@ -8,6 +8,12 @@ The application uses VARA's control and data network ports, and not the modem's 
 Click on a message line to retrive it. Working on address book, BBS Command reference, and more.<br>
 Use [Send Message] button to compose a message or bulletin, or right clink on a private message to REPLY to sender.
 
+Ver 1.0.6 
+YAPP: both file send and receive are now working. Progress bar sometimes. Large files on VARA FM have reached speed 9 [14144] or more. 
+My plan was for local users to be able to download hurricane paths righ fro my satellite receiver.
+
+This is Vara, so when the link to BBS times out, most functions will automatically reconnect to the BBS.
+
 73<br>
 Sperry - N4SD
 
