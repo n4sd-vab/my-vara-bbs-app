@@ -230,6 +230,7 @@
         .modal-btn.cancel {
             background: #ccc;
         }
+
         .modal-btn.cancel:hover {
             background: #999;
         }
@@ -238,6 +239,7 @@
             background: #0078ff;
             color: white;
         }
+
         .modal-btn.send:hover {
             background: #005bb5;
         }
@@ -246,6 +248,7 @@
             background: #0078ff;
             color: white;
         }
+
         .modal-btn.save:hover {
             background: #005bb5;
         }
@@ -616,6 +619,9 @@
 
                 addressBookModal.style.display = "flex";
             }
+
+
+
             function resetYappSendModal() {
                 // Show file picker
                 document.getElementById("yappPickerSection").style.display = "block";
@@ -782,7 +788,7 @@
                 });
             });
 
-          
+
             window.electronAPI.onOpenYappReceive(async () => {
                 yappReceiveModal.style.display = "flex";
 
@@ -835,10 +841,19 @@
                 }
             });
 
+            window.electronAPI.onYappSendError((event, { message }) => {
+                document.getElementById("yappSendErrorMessage").innerText =
+                    message || "An unknown error occurred during YAPP send.";
+
+                document.getElementById("yappSendErrorSection").style.display = "block";
+                document.getElementById("yappSendProgressSection").style.display = "none";
+            });
+
             // ------------------------------------------------------------
             // START SEND BUTTON
             // ------------------------------------------------------------
             document.getElementById("yappSendStartBtn").addEventListener("click", async () => {
+                await ensureBbsConnected();
                 const filePath = document.getElementById("yappModalSendFile").value;
 
                 if (!filePath) {
@@ -1201,8 +1216,14 @@
                 resetYappSendModal();
                 yappSendModal.style.display = "none";
             });
+            yappSendErrorCloseBtn.addEventListener("click", () => {
+                document.getElementById("yappSendErrorSection").style.display = "none";
+                document.getElementById("yappPickerSection").style.display = "block";
+            });
 
-            yappReceiveStartBtn.addEventListener('click', () => {
+            document.getElementById("yappReceiveStartBtn").addEventListener("click", async () => {
+                await ensureBbsConnected();
+
                 const filename = document.getElementById('fileName').value.trim();
                 const directory = document.getElementById('yappModalDirInput').value.trim();
 
@@ -1363,18 +1384,18 @@
             <h3>YAPP - Receive File from BBS</h3>
             <div id="yappFileListSection">
                 <button type="button" id="yappLoadFileListBtn" class="modal-btn">Get File List</button>
-            
+
                 <ul id="yappFileList"></ul>
-            
+
                 <label>File Name:</label><br>
                 <input id="fileName" class="modal-input"><br>
-            
+
                 <label>Save to Directory</label>
                 <div class="dir-picker">
                     <input id="yappModalDirInput" type="text" readonly>
                     <button id="yappModalDirButton">Browse…</button>
                 </div>
-            
+
                 <div style="text-align:right;">
                     <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
                     <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
@@ -1405,14 +1426,16 @@
                     <button id="yappSendStartBtn" class="modal-btn send">Start</button>
                 </div>
             </div>
-
             <div id="yappSendProgressSection" style="display:none;">
                 <div id="yappSendProgressContainer">
                     <div id="yappSendProgressText"></div>
                     <div id="yappSendProgressBar"></div>
                 </div>
             </div>
-
+            <div id="yappSendErrorSection" style="display: none;">
+                <div id="yappSendErrorMessage"></div>
+                <button id="yappSendErrorCloseBtn">OK</button>
+            </div>
         </div>
     </div>
 

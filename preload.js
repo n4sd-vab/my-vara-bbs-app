@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     startYappSend: (info) => ipcRenderer.send("yapp-start-send", info),
 
+    onYappSendError: (callback) => ipcRenderer.on("yapp-send-error", callback),
+
     requestYappFileList: () => ipcRenderer.send('yapp-request-file-list'),
     onYappFileList: (callback) => ipcRenderer.on('yapp-file-list', (_e, files) => callback(files)),
 

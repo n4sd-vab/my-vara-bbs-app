@@ -470,7 +470,7 @@ ipcMain.handle('vara-connect', async () => {
 
       console.log("RAW DATA:", data);
       //console.log("HEX:", data.toString('hex'));
-      //console.log("ascii:", data.toString('ascii'));
+      console.log("ascii:", data.toString('ascii'));
       //console.log("BYTES:", [...data]);
       //console.log("DATA SOCKET RECEIVED:", data);
       console.log("inYappSend =", inYappSend);
@@ -485,10 +485,19 @@ ipcMain.handle('vara-connect', async () => {
             text.includes("Unexpected message during YAPP Transfer") ||
             text.includes("Transfer cancelled") ||
             text.includes("Invalid Command")
+            //text.includes("already exists")
           ) {
             console.log("YAPP: remote cancelled transfer via BPQ message");
             clearTimeout(yappSend.ackTimeout);
             yappSend.abortSend("Remote cancelled YAPP transfer");
+            return;
+          }
+
+          if (bytes[0] === 0x15 || bytes[0] === 0x18) { // NAK - treat as fatal error
+            const message = text.slice(2).split('\r')[0]; // remove "NAK " prefix and any trailing text
+            console.log("YAPP: received NAK from VARA:", message);
+            yappSend.abortSend(message || "Received NAK from VARA");
+            inYappSend=false;
             return;
           }
 
@@ -688,7 +697,7 @@ function beginYappSendStateMachine(fileName, fileSize, fileBytes) {
 
     logToRenderer("error", `YAPP send aborted: ${reason}`);
     if (mainWindow && mainWindow.webContents) {
-      mainWindow.webContents.send("yapp-send-error", reason);
+      mainWindow.webContents.send("yapp-send-error", { message: reason });
     }
   }
 }
@@ -1098,8 +1107,7 @@ ipcMain.on("yapp-start-send", (event, info) => {
   setInYappSend(true);
   yappSend = null;
 
-  console.log("IPC: yapp-start-send received", new Error().stack);
-
+  console.log("IPC: yapp-start-send received", { stack: new Error().stack });
 
   const { fileName, fileSize, fileBytes } = info;
 
