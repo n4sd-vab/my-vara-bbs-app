@@ -500,7 +500,7 @@
                 const from = (parts[6] || "").padEnd(7);
                 const subject = parts.slice(7).join(" ");
 
-                const paddedLine = msgNum.padEnd(5) + date + " " + status + size + " " + to + at + from + subject;
+                const paddedLine = msgNum.padEnd(6) + date + " " + status + size + " " + to + at + from + subject;
 
                 return `
                 <div class="msgRow" data-msg="${msgNum}">${paddedLine}</div>
