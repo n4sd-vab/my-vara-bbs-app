@@ -14,9 +14,8 @@ My plan was for local users to be able to download hurricane paths righ fro my s
 
 This is Vara, so when the link to BBS times out, most functions will automatically reconnect to the BBS.
 
+<img width="1335" height="1013" alt="MyVaraBbsApp" src="https://github.com/user-attachments/assets/e3206f2c-4ffb-4050-be5e-c7d42caeeabf" />
+
 73<br>
 Sperry - N4SD
 
-![VARA-BBS-APP-1](https://github.com/user-attachments/assets/e01a2600-caef-4a72-8ce6-a5be92f2c7e0)
-
-Sperry - N4SD
