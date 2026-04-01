@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>VARA BBS Client ver 1.0.7b</title>
+    <title>VARA BBS Client ver 1.0.8</title>
     <style>
         body {
             background: #d4dde7;
@@ -113,7 +113,7 @@
 
         .send-row {
             display: flex;
-            align-items: center;
+            align-items: left;
             gap: 8px;
         }
 
@@ -161,7 +161,7 @@
         }
 
         #dataWindow {
-            white-space: pre-wrap;
+            white-space: pre;
             font-family: monospace;
         }
 
@@ -346,7 +346,7 @@
             <button id="listMineBtn">List Mine</button>
             <button id="listBullBtn">List Bulletins</button>
             <button id="listWxBtn">List Weather</button> |
-            <button id="sendBtn">Send Message</button>
+            <button id="sendBtn">Compose Message</button>
         </div>
         <div id="statusBar" style="
         display: flex;
@@ -379,12 +379,11 @@
                 font-family:monospace; padding:8px; border: 1px solid black; border-radius: 8px;">
             </div>
             <!-- RIGHT: Message Viewer -->
-            <div id="msgView"
-                style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5); 
-                white-space:pre-wrap; font-family:monospace; padding:8px; border: 1px solid black; border-radius: 8px;">
+            <div id="msgView" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5);
+                 white-space:pre; font-family:monospace; padding:8px;
+                 border: 1px solid black; border-radius: 8px;">
                 <em>Select a message to view it</em><br>
-            </div>
-        </div>
+            </div></div>
         <!-- SEND DATA (single line) -->
         <div id="sendSection" class="send-row">
             <label for="txInput">Send BBS Command:</label>
@@ -523,6 +522,25 @@
                 return { msgNum, sender, subject };
             }
 
+            let lastLineWasBlank = false;
+
+            function appendMsgViewLine(line) {
+                const isBlank = line.trim().length === 0;
+
+                if (isBlank) {
+                    if (lastLineWasBlank) {
+                        // skip this line — it's an extra blank
+                        return;
+                    }
+                    lastLineWasBlank = true;
+                } else {
+                    lastLineWasBlank = false;
+                }
+
+                msgView.textContent += line + "\n";
+                msgView.scrollTop = msgView.scrollHeight;
+            }
+
             async function ensureBbsConnected() {
                 console.log("BBS Link Status:", bbsLinkUp, "BBS prompt ready:", bbsPromptReady);
 
@@ -620,8 +638,6 @@
                 addressBookModal.style.display = "flex";
             }
 
-
-
             function resetYappSendModal() {
                 // Show file picker
                 document.getElementById("yappPickerSection").style.display = "block";
@@ -636,6 +652,7 @@
                 // Clear file path
                 document.getElementById("yappModalSendFile").value = "";
             }
+
             function resetYappRecvModal() {
                 // Show file picker
                 document.getElementById("yappFileListSection").style.display = "block";
@@ -650,6 +667,7 @@
                 // Clear file path
                 //document.getElementById("yappModalSendFile").value = "";
             }
+
             function showToast(text) {
                 const toast = document.createElement("div");
                 toast.className = "toast";
@@ -663,13 +681,11 @@
                 }, 2500);
             }
 
-
             // Listen for VARA console toggle from main process
             window.electronAPI.onToggleVaraConsole((visible) => {
                 const section = document.getElementById("varaConsoleSection");
                 section.style.display = visible ? "block" : "none";
             });
-
 
             const cancelBtn = document.getElementById("addressBookCancelBtn");
             // const saveBtn = document.getElementById("addressBookSaveBtn");
@@ -716,7 +732,6 @@
 
                 addressBookModal.style.display = "none";
             });
-
 
             window.electronAPI.onOpenAddressBookView(async () => {
                 addressBookViewModal.style.display = "flex";
@@ -787,7 +802,6 @@
                     list.appendChild(li);
                 });
             });
-
 
             window.electronAPI.onOpenYappReceive(async () => {
                 yappReceiveModal.style.display = "flex";
@@ -913,7 +927,6 @@
                     resetYappSendModal();
                     document.getElementById("yappSendModal").style.display = "none";
 
-
                     const toast = document.getElementById("yappToast");
                     toast.innerText = "File sent successfully";
                     toast.classList.add("show");
@@ -930,20 +943,22 @@
             window.electronAPI.onOpenBbsHelp(() => {
                 document.getElementById("bbsHelpModal").style.display = "flex";
             });
-
-
+            // About Modal
+            window.electronAPI.onOpenAbout(() => {
+                document.getElementById("aboutModal").style.display = "flex";
+            });
             //  
             // Listen for message context menu events
             // 
-
             window.vara.onLog(({ type, msg }) => {
                 appendCommand(type, msg);
 
                 // Split into individual VARA/BPQ lines
-                const lines = msg.split(/\r\n|\r|\n/).filter(l => l.trim().length > 0);
+                //const lines = msg.split(/\r\n|\r|\n/).filter(l => l.trim().length > 0);
+                const lines = msg.split(/\r\n|\r|\n/);
 
                 for (const line of lines) {
-                    handleVaraLine(type, line.trim());
+                    handleVaraLine(type, line);
                 }
             });
 
@@ -1026,14 +1041,13 @@
                         msgList.innerHTML += formatBbsLine(line);
                         msgList.scrollTop = msgList.scrollHeight;
                     } else {
-                        msgView.innerHTML += line + "<br>";
+                        // Assume anything else is message content for now
+                        // msgView.innerText += line + "\n";
+                        appendMsgViewLine(line);
                         msgView.scrollTop = msgView.scrollHeight;
                     }
                 }
             }
-
-
-
 
             connectBtn.addEventListener('click', async () => {
                 try {
@@ -1193,8 +1207,6 @@
                 });
             });
 
-
-
             sendBtn.addEventListener('click', () => {
                 composeModal.style.display = "flex";
             });
@@ -1236,6 +1248,9 @@
 
             bbsHelpClose.addEventListener('click', () => {
                 document.getElementById("bbsHelpModal").style.display = "none";
+            });
+            aboutClose.addEventListener('click', () => {
+                document.getElementById("aboutModal").style.display = "none";
             });
 
             composeSendBtn.addEventListener('click', async () => {
@@ -1485,6 +1500,24 @@ YAPP - Download file from BBS using YAPP protocol
 
             </pre>
             <button id="bbsHelpClose">Close</button>
+        </div>
+    </div>
+
+    <div id="aboutModal" class="modal-overlay">
+        <div class="modal-window-2">
+            <h3>About My Vara BBS App</h3>
+            <pre class="help-text">
+This is my Electron app to connect to a G8BPQ Packet BBS 
+via VARA FM. It is built using Electron and the VARA API, 
+and is designed to provide a user-friendly interface for 
+accessing BBS features like message lists, reading messages, 
+sending messages, YAPP file transfers, and an address book.
+
+Still much to do. Suggestions welcome.
+
+Sperry - N4SD
+            </pre>
+            <button id="aboutClose">Close</button>
         </div>
     </div>
 

@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback()),
 
+    onOpenAbout: (callback) => ipcRenderer.on("open-about", () => callback()),
+
     startYappReceive: (info) => ipcRenderer.send('start-yapp-receive', info),
 
     startYappSend: (info) => ipcRenderer.send("yapp-start-send", info),

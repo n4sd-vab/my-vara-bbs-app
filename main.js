@@ -158,6 +158,12 @@ const menuTemplate = [
         click: () => {
           mainWindow.webContents.send("open-bbs-help");
         }
+      },
+      {
+        label: "About",
+        click: () => {
+          mainWindow.webContents.send("open-about");
+        }
       }
     ]
   }
@@ -468,9 +474,9 @@ ipcMain.handle('vara-connect', async () => {
         return;
       }
 
-      console.log("RAW DATA:", data);
+      //console.log("RAW DATA:", data);
       //console.log("HEX:", data.toString('hex'));
-      console.log("ascii:", data.toString('ascii'));
+      //console.log("ascii:", data.toString('ascii'));
       //console.log("BYTES:", [...data]);
       //console.log("DATA SOCKET RECEIVED:", data);
       console.log("inYappSend =", inYappSend);
@@ -581,7 +587,7 @@ ipcMain.handle('vara-connect', async () => {
 
         // All complete lines except the last
         for (let i = 0; i < parts.length - 1; i++) {
-          const line = parts[i].trim();
+          const line = parts[i];
           logToRenderer('data', line);
         }
 
