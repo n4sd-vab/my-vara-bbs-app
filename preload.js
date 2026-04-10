@@ -57,6 +57,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     updateAddressBookEntry: (entry) => ipcRenderer.invoke("addressbook-update", entry),
 
+    // white pages import
+    startWhitePagesMode: () => ipcRenderer.send('whitepages-start'),
+
+    onOpenWhitePagesModal: (callback) =>
+        ipcRenderer.on("open-whitepages-import", () => callback()),
+
+    onWhitePagesLine: (callback) => ipcRenderer.on("whitepages-line", (_e, entry) => callback(entry)),
+
     onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback()),
 
     onOpenAbout: (callback) => ipcRenderer.on("open-about", () => callback()),

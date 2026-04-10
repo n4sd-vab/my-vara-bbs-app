@@ -11,7 +11,6 @@ const dbPath = path.join(app.getPath('userData'), 'bbs.db');
 const db = new Database(dbPath);
 initializeDatabase();
 
-
 function loadSettings() {
   try {
     return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -66,7 +65,6 @@ function saveSettings(settings) {
     mainWindow.webContents.send("settings-updated", settings);
   }
   //TODO: consider also sending specific events for important individual settings (e.g., VARA console toggle) instead of a generic "settings-updated"
-
 }
 
 let settings = loadSettings();
@@ -83,7 +81,8 @@ let fileList = [];
 let inYappSend = false;
 let yappSend = null; // holds the sender state machine instance
 
-
+let whitePagesMode = false;
+let whitePagesResults = [];
 
 const menuTemplate = [
   {
@@ -111,6 +110,12 @@ const menuTemplate = [
         label: "Address Book View",
         click: () => {
           mainWindow.webContents.send("open-address-book-view");
+        }
+      },
+      {
+        label: "WhitePages Import",
+        click: () => {
+          mainWindow.webContents.send("open-whitepages-import");
         }
       }
     ]
@@ -169,10 +174,8 @@ const menuTemplate = [
   }
 ];
 
-
 const menu = Menu.buildFromTemplate(menuTemplate);
 Menu.setApplicationMenu(menu);
-
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -206,11 +209,12 @@ function initializeDatabase() {
         );
 
         CREATE TABLE IF NOT EXISTS address_book (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             callsign TEXT UNIQUE,
-            name TEXT,
-            location TEXT,
             homebbs TEXT,
+            name TEXT,
+            zipcode TEXT,
+            address TEXT,
             notes TEXT
         );
 
@@ -226,6 +230,45 @@ function initializeDatabase() {
         CREATE INDEX IF NOT EXISTS idx_address_callsign ON address_book(callsign);
 
     `);
+}
+
+function parseWhitePagesLine(line) {
+  const parts = line.trim().split(/\s+/);
+
+  const callsign = parts[0];
+  const homebbs = parts[1];
+
+  // Everything after homebbs
+  const rest = parts.slice(2).join(" ").trim();
+
+  // Extract ZIP (5 digits)
+  const zipMatch = rest.match(/\b\d{5}\b/);
+  const zipcode = zipMatch ? zipMatch[0] : "";
+
+  let name = "";
+  let address = "";
+
+  if (zipcode) {
+    // Split at ZIP
+    const [beforeZip, afterZip] = rest.split(zipcode);
+
+    name = beforeZip.trim();          // everything before ZIP
+    address = afterZip.trim();        // everything after ZIP (city/state)
+  } else {
+    // No ZIP → name is first token
+    const tokens = rest.split(/\s+/);
+    name = tokens[0];
+    address = rest.replace(name, "").trim();
+  }
+
+  return {
+    callsign,
+    homebbs,
+    name,
+    zipcode,
+    address,
+    notes: ""
+  };
 }
 
 app.whenReady().then(() => {
@@ -389,7 +432,7 @@ function updateRecvProgress(received, total) {
     if (mainWindow && mainWindow.webContents) {
       console.log(`YAPP Progress: received ${received} of ${total} bytes (${percent}%)`);
 
-      mainWindow.webContents.send("yapp-recv-progress", {received, total, percent});
+      mainWindow.webContents.send("yapp-recv-progress", { received, total, percent });
     }
   });
 }
@@ -429,7 +472,7 @@ ipcMain.handle('vara-connect', async () => {
 
     cmdSocket.on('data', (data) => {
       logToRenderer('cmd', data.toString());
-      
+
       //Check for BUFFER messages during YAPP send
       if (yappSend && yappSend.phase === "sendingData") {
         const line = data.toString("utf8");
@@ -468,15 +511,58 @@ ipcMain.handle('vara-connect', async () => {
 
     // ---------------- VARA DATA SOCKET ----------------
     dataSocket.on('data', (data) => {
+
+      // Persistent buffer for WP mode
+      let wpBuffer = "";
+
+      // --------------------------
+      // Check for WhitePages lines
+      // --------------------------
+      if (whitePagesMode) {
+
+        // Accumulate raw TCP data
+        wpBuffer += data.toString();
+
+        // Split on CR (BPQ uses CR, not LF)
+        const parts = wpBuffer.split('\r');
+
+        // Process all complete lines
+        for (let i = 0; i < parts.length - 1; i++) {
+          const line = parts[i].trim();
+
+          if (!line) continue;
+
+          // END OF LISTING: "de CALL>"
+          if (/^de\s+[A-Za-z0-9]{3,6}>$/.test(line)) {
+            console.log("WhitePages: End of listing detected");
+            whitePagesMode = false;
+            wpBuffer = "";   // clear buffer
+            return;
+          }
+
+          // VALID WP ENTRY
+          if (/^[A-Z0-9]{3,6}\s+\S+/.test(line)) {
+            const entry = parseWhitePagesLine(line);
+            whitePagesResults.push(entry);
+            mainWindow.webContents.send("whitepages-line", entry);
+          }
+        }
+
+        // Save incomplete tail
+        wpBuffer = parts[parts.length - 1];
+
+        return; // swallow WP lines
+      }
+
       if (inYappSend && !yappSend) {
         // We are in YAPP mode but state machine not initialized yet
         // Ignore all text until state machine starts
         return;
       }
 
-      //console.log("RAW DATA:", data);
+      console.log("RAW DATA:", data);
       //console.log("HEX:", data.toString('hex'));
-      //console.log("ascii:", data.toString('ascii'));
+      console.log("ascii:", data.toString('ascii'));
       //console.log("BYTES:", [...data]);
       //console.log("DATA SOCKET RECEIVED:", data);
       console.log("inYappSend =", inYappSend);
@@ -503,7 +589,7 @@ ipcMain.handle('vara-connect', async () => {
             const message = text.slice(2).split('\r')[0]; // remove "NAK " prefix and any trailing text
             console.log("YAPP: received NAK from VARA:", message);
             yappSend.abortSend(message || "Received NAK from VARA");
-            inYappSend=false;
+            inYappSend = false;
             return;
           }
 
@@ -575,6 +661,8 @@ ipcMain.handle('vara-connect', async () => {
           handleFileListText(data.toString());
           return;   // do NOT fall through to normal text logic
         }
+
+
 
         // -------------------------
         // 4. NORMAL BBS TEXT MODE
@@ -939,7 +1027,6 @@ class YappReceiver {
 // END OF YAPP Receiver IMPLEMENTATION
 //---------------------------------------------------------------------------//
 
-
 /**
  * Send a command line to VARA command port
  */
@@ -1005,6 +1092,11 @@ ipcMain.on("show-message-context-menu", (event, data) => {
   menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
 });
 
+ipcMain.on('whitepages-start', () => {
+  whitePagesMode = true;
+  whitePagesResults = [];
+});
+
 ipcMain.on('start-yapp-receive', async (event, info) => {
   const { filename, directory } = info;
 
@@ -1041,12 +1133,34 @@ ipcMain.on("yapp-request-file-list", () => {
   }
 });
 
-// Address book IPC handlers
 ipcMain.handle('address-book-save', (_event, entry) => {
-  const stmt = db.prepare(`INSERT OR REPLACE INTO address_book
-        (callsign, name, location, homebbs, notes)
-        VALUES (@callsign, @name, @location, @homebbs, @notes)`);
-  stmt.run(entry);
+
+  if (entry.preserveNotes) {
+    // WP import: do NOT overwrite notes
+    db.prepare(`
+      INSERT INTO address_book (callsign, homebbs, name, zipcode, address)
+      VALUES (@callsign, @homebbs, @name, @zipcode, @address)
+      ON CONFLICT(callsign) DO UPDATE SET
+          homebbs = excluded.homebbs,
+          name = excluded.name,
+          zipcode = excluded.zipcode,
+          address = excluded.address
+    `).run(entry);
+  } else {
+    // Manual edit: update everything including notes
+    db.prepare(`
+      INSERT INTO address_book (callsign, homebbs, name, zipcode, address, notes)
+      VALUES (@callsign, @homebbs, @name, @zipcode, @address, @notes)
+      ON CONFLICT(callsign) DO UPDATE SET
+          homebbs = excluded.homebbs,
+          name = excluded.name,
+          zipcode = excluded.zipcode,
+          address = excluded.address,
+          notes = excluded.notes
+    `).run(entry);
+  }
+
+  return { success: true, entry };
 });
 
 ipcMain.handle('address-book-get', () => {
@@ -1056,18 +1170,27 @@ ipcMain.handle('address-book-get', () => {
 
 ipcMain.handle("addressbook-delete", (event, id) => {
   db.prepare("DELETE FROM address_book WHERE id = ?").run(id);
+  return { success: true, id };
 });
 
 ipcMain.handle("addressbook-get-one", (event, id) => {
   return db.prepare("SELECT * FROM address_book WHERE id = ?").get(id);
 });
 
+// Note: this uses the same 'save' logic as add, but requires the ID to be present in the entry
 ipcMain.handle("addressbook-update", (event, entry) => {
   db.prepare(`
-        UPDATE address_book
-        SET callsign = ?, name = ?, location = ?, homebbs = ?, notes = ?
-        WHERE id = ?
-    `).run(entry.callsign, entry.name, entry.location, entry.homebbs, entry.notes, entry.id);
+    UPDATE address_book
+    SET callsign=@callsign,
+        homebbs=@homebbs,
+        name=@name,
+        zipcode=@zipcode,
+        address=@address,
+        notes=@notes
+    WHERE id=@id
+  `).run(entry);
+
+  return { success: true, entry };
 });
 
 ipcMain.handle("pick-directory", async () => {

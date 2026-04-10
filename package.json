@@ -1,6 +1,6 @@
 {
   "name": "my-vara-bbs-app",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Native VARA BBS Client",
   "main": "main.js",
   "scripts": {
@@ -26,6 +26,7 @@
     "@electron-forge/publisher-github": "^7.11.1",
     "@electron/fuses": "^1.8.0",
     "electron": "^40.2.1",
+    "electron-forge-maker-nsis": "^26.8.1",
     "electron-rebuild": "^3.2.9"
   },
   "dependencies": {

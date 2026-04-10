@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>VARA BBS Client ver 1.0.8</title>
+    <title>VARA BBS Client ver 1.0.9</title>
     <style>
         body {
             background: #d4dde7;
@@ -176,7 +176,11 @@
             background: rgba(0, 0, 0, 0.45);
             justify-content: center;
             align-items: center;
-            z-index: 999;
+            z-index: 1000;
+        }
+
+        .modal-overlay.front {
+            z-index: 2000;
         }
 
         /* Modal window */
@@ -184,13 +188,21 @@
             background: #fff;
             color: #222;
             padding: 20px;
-            width: 420px;
+            width: 500px;
             border-radius: 8px;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
             font-family: sans-serif;
+
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
         }
 
         .modal-window-2 {
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
             background: #fff;
             color: #222;
             padding: 20px;
@@ -203,12 +215,60 @@
         /* Inputs */
         .modal-input,
         .modal-textarea {
-            width: 100%;
+            width: 95%;
             margin-bottom: 12px;
             padding: 8px;
             border: 1px solid #ccc;
             border-radius: 4px;
             font-size: 14px;
+        }
+
+        .modal-input2 {
+            width: 45%;
+            margin-bottom: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .modal-window-2 {
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ab-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            /* spacing between columns */
+            align-items: start;
+        }
+
+        .ab-callsign {
+            color: #4af;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .ab-table-container {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .ab-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            /* required for colgroup to work */
+        }
+
+        .ab-table th,
+        .ab-table td {
+            padding: 4px 6px;
+            border-bottom: 1px solid #444;
+            font-size: 12px;
         }
 
         /* Buttons */
@@ -251,6 +311,42 @@
 
         .modal-btn.save:hover {
             background: #005bb5;
+        }
+
+        /* White Pages Modal specific styles */
+        .wp-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            margin-bottom: 12px;
+        }
+
+        .wp-col {
+            flex: 1;
+        }
+
+        .wp-results {
+            width: 100%;
+            /* ← fixes the 25% width issue */
+            height: 200px;
+            border: 1px solid #555;
+            padding: 6px;
+            margin-bottom: 12px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+            background: #333;
+            /* dark gray, not pure black */
+            color: #0f0;
+            /* or #fff if you prefer */
+            box-sizing: border-box;
+            /* ← ensures padding doesn’t shrink width */
+        }
+
+        .wp-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
         }
 
         /* Containers for both Send and Receive */
@@ -346,7 +442,7 @@
             <button id="listMineBtn">List Mine</button>
             <button id="listBullBtn">List Bulletins</button>
             <button id="listWxBtn">List Weather</button> |
-            <button id="sendBtn">Compose Message</button>
+            <button id="composeMsgBtn">Compose Message</button>
         </div>
         <div id="statusBar" style="
         display: flex;
@@ -383,7 +479,8 @@
                  white-space:pre; font-family:monospace; padding:8px;
                  border: 1px solid black; border-radius: 8px;">
                 <em>Select a message to view it</em><br>
-            </div></div>
+            </div>
+        </div>
         <!-- SEND DATA (single line) -->
         <div id="sendSection" class="send-row">
             <label for="txInput">Send BBS Command:</label>
@@ -395,12 +492,13 @@
             let bbsLinkUp = false;
             let connected = false;
             let bbsPromptReady = false;
+            let whitePagesResults = [];
 
             // Load settings ONCE
             const appSettings = await window.settings.get();
 
             // Get DOM elements
-            const sendBtn = document.getElementById('sendBtn');
+            const composeMsgBtn = document.getElementById('composeMsgBtn');
             const composeModal = document.getElementById('composeModal');
             const composeCancelBtn = document.getElementById('composeCancelBtn');
             const composeTo = document.getElementById('composeTo');
@@ -437,7 +535,7 @@
 
             const addCallsign = document.getElementById('addCallsign');
             const addName = document.getElementById('addName');
-            const addLocation = document.getElementById('addLocation');
+            const addAddress = document.getElementById('addAddress');
             const addHomeBBS = document.getElementById('addHomeBBS');
             const addNotes = document.getElementById('addNotes');
 
@@ -601,7 +699,7 @@
                 listBullBtn.disabled = !connected;
                 listWxBtn.disabled = !connected;
                 listNewBtn.disabled = !connected;
-                sendBtn.disabled = !connected;
+                composeMsgBtn.disabled = !connected;
 
                 statusVara.textContent = connected ? "Connected" : "Disconnected";
                 statusVara.style.color = connected ? "#0f0" : "#f33";
@@ -619,23 +717,31 @@
                 document.querySelectorAll(".ab-delete").forEach(btn => {
                     btn.addEventListener("click", async () => {
                         const id = btn.dataset.id;
-                        await window.electronAPI.deleteAddressBookEntry(id);
-                        window.electronAPI.onOpenAddressBookView(); // reload the table
+
+                        const result = await window.electronAPI.deleteAddressBookEntry(id);
+
+                        if (result?.success) {
+                            const row = document.querySelector(`tr[data-id="${id}"]`);
+                            if (row) row.remove();
+                        }
                     });
                 });
             }
 
             function openEditAddressBookModal(entry) {
+                addressBookModal.classList.add("front");
+                addressBookModal.style.display = "flex";
+
                 addCallsign.value = entry.callsign;
-                addName.value = entry.name;
-                addLocation.value = entry.location;
                 addHomeBBS.value = entry.homebbs;
+                addName.value = entry.name;
+                addZipcode.value = entry.zipcode;
+                addAddress.value = entry.address;
                 addNotes.value = entry.notes;
 
                 addressBookSaveBtn.textContent = "Update";
                 addressBookSaveBtn.dataset.id = entry.id;
 
-                addressBookModal.style.display = "flex";
             }
 
             function resetYappSendModal() {
@@ -690,6 +796,10 @@
             const cancelBtn = document.getElementById("addressBookCancelBtn");
             // const saveBtn = document.getElementById("addressBookSaveBtn");
 
+            async function loadAddressBook() {
+                return await window.electronAPI.getAddressBook();
+            }
+
             window.electronAPI.onOpenAddressBookAdd(async () => {
                 addressBookModal.style.display = "flex";
                 // optionally retrieve existing entries (for debugging / later use)
@@ -709,38 +819,112 @@
                 const entry = {
                     id: addressBookSaveBtn.dataset.id || null,
                     callsign: addCallsign.value,
-                    name: addName.value,
-                    location: addLocation.value,
                     homebbs: addHomeBBS.value,
+                    name: addName.value,
+                    zipcode: addZipcode.value,
+                    address: addAddress.value,
                     notes: addNotes.value
                 };
 
+                let result;
+
                 if (entry.id) {
-                    await window.electronAPI.updateAddressBookEntry(entry);
+                    result = await window.electronAPI.updateAddressBookEntry(entry);
                 } else {
-                    await window.electronAPI.saveAddressBookEntry(entry);
+                    result = await window.electronAPI.saveAddressBookEntry(entry);
                 }
 
+                // ⭐ Update the row in real time
+                if (result?.success && entry.id) {
+                    const row = document.querySelector(`tr[data-id="${entry.id}"]`);
+                    if (row) {
+                        row.querySelector(".ab-callsign").textContent = entry.callsign;
+                        row.querySelector(".ab-name").textContent = entry.name;
+                        row.querySelector(".ab-homebbs").textContent = entry.homebbs;
+                        row.querySelector(".ab-zipcode").textContent = entry.zipcode;
+                        row.querySelector(".ab-address").textContent = entry.address;
+                        row.querySelector(".ab-notes").textContent = entry.notes;
+                    }
+                }
+
+                // Reset button state
                 addressBookSaveBtn.textContent = "Save";
                 delete addressBookSaveBtn.dataset.id;
 
+                // Clear form
                 addCallsign.value = "";
-                addName.value = "";
-                addLocation.value = "";
                 addHomeBBS.value = "";
+                addName.value = "";
+                addAddress.value = "";
+                addZipcode.value = "";
                 addNotes.value = "";
 
+                // Close modal
                 addressBookModal.style.display = "none";
+                addressBookModal.classList.remove("front");
             });
+
+            async function renderAddressBookTable() {
+                const tbody = document.getElementById("addressBookTableBody");
+                let entries = [];
+
+                try {
+                    entries = await window.electronAPI.getAddressBook();
+                } catch (err) {
+                    console.error("Failed to load address book", err);
+                }
+
+                // ⭐ Apply sorting
+                entries.sort((a, b) => {
+                    const col = addressBookSort.column;
+                    const dir = addressBookSort.direction === "asc" ? 1 : -1;
+
+                    const av = a[col] || "";
+                    const bv = b[col] || "";
+
+                    return av.localeCompare(bv, undefined, { numeric: true }) * dir;
+                });
+
+                // Render rows
+                tbody.innerHTML = entries.map(e => `
+                    <tr data-id="${e.id}">
+                    <td><span class="ab-callsign" data-callsign="${e.callsign}">${e.callsign}</span></td>
+                    <td class="ab-name">${e.name || ""}</td>
+                    <td class="ab-homebbs">${e.homebbs || ""}</td>
+                    <td class="ab-zipcode">${e.zipcode || ""}</td>
+                    <td class="ab-address">${e.address || ""}</td>
+                    <td class="ab-notes">${e.notes || ""}</td>
+                    <td>
+                        <button class="ab-edit" data-id="${e.id}">Edit</button>
+                        <button class="ab-delete" data-id="${e.id}">Delete</button>
+                    </td>
+                </tr>
+                `).join("");
+
+                attachAddressBookRowHandlers();
+            }
 
             window.electronAPI.onOpenAddressBookView(async () => {
                 addressBookViewModal.style.display = "flex";
+                renderAddressBookTable();
+            });
+
+            /* window.electronAPI.onOpenAddressBookView(async () => {
+      addressBookViewModal.style.display = "flex";
 
                 const tbody = document.getElementById("addressBookTableBody");
                 let entries = [];
 
                 try {
                     entries = await window.electronAPI.getAddressBook();
+
+                    entries.sort((a, b) => {
+                        const col = addressBookSort.column;
+                        const dir = addressBookSort.direction === "asc" ? 1 : -1;
+
+                        return a[col].localeCompare(b[col], undefined, { numeric: true }) * dir;
+                    });
+
                     console.log("Address book entries:", entries);
                 } catch (err) {
                     console.error("Failed to load address book", err);
@@ -748,11 +932,16 @@
 
                 tbody.innerHTML = entries.map(e => `
                     <tr data-id="${e.id}">
-                    <td>${e.callsign}</td>
-                    <td>${e.name || ""}</td>
-                    <td>${e.location || ""}</td>
-                    <td>${e.homebbs || ""}</td>
-                    <td>${e.notes || ""}</td>
+                    <td>
+                        <span class="ab-callsign" data-callsign="${e.callsign}">
+                            ${e.callsign}
+                        </span>
+                    </td>
+                    <td class="ab-name">${e.name || ""}</td>
+                    <td class="ab-homebbs">${e.homebbs || ""}</td>
+                    <td class="ab-zipcode">${e.zipcode || ""}</td>
+                    <td class="ab-address">${e.address || ""}</td>
+                    <td class="ab-notes">${e.notes || ""}</td>
                     <td>
                         <button class="ab-edit" data-id="${e.id}">Edit</button>
                         <button class="ab-delete" data-id="${e.id}">Delete</button>
@@ -761,7 +950,74 @@
                 `).join("");
 
                 attachAddressBookRowHandlers();
+            }); */
+
+            document.addEventListener("click", (e) => {
+                if (e.target.classList.contains("ab-callsign")) {
+                    const callsign = e.target.dataset.callsign;
+                    addressBookViewModal.style.display = "none";
+                    openComposeModal(callsign);
+                }
             });
+
+            let addressBookSort = { column: "callsign", direction: "asc" };
+
+            document.querySelectorAll(".ab-table th[data-column]").forEach(th => {
+                th.addEventListener("click", () => {
+                    const col = th.dataset.column;
+
+                    if (addressBookSort.column === col) {
+                        addressBookSort.direction =
+                            addressBookSort.direction === "asc" ? "desc" : "asc";
+                    } else {
+                        addressBookSort.column = col;
+                        addressBookSort.direction = "asc";
+                    }
+
+                    // Re-render using your existing viewer
+                    renderAddressBookTable();
+                });
+            });
+
+            window.electronAPI.onOpenWhitePagesModal(async () => {
+                document.getElementById("whitePagesModal").style.display = "flex";
+            });
+
+            wpCancelBtn.addEventListener('click', () => {
+                whitePagesModal.style.display = "none";
+            });
+
+            document.getElementById("whitePagesWindow")
+                .addEventListener("click", e => e.stopPropagation());
+
+            wpRunQueryBtn.addEventListener('click', () => {
+                const query = wpQuery.value.trim();
+                console.log("Running WhitePages query:", query);
+                if (!query) return;
+
+                window.electronAPI.startWhitePagesMode();
+
+                wpResults.innerHTML = "Querying BBS...";
+
+                sendBbsCommand(query + "\r");
+            });
+
+            window.electronAPI.onWhitePagesLine((entry) => {
+                whitePagesResults.push(entry);   // ← store it locally
+
+                wpResults.innerHTML +=
+                    `${entry.callsign}  ${entry.homebbs}  ${entry.name} ${entry.zipcode} ${entry.address} <br>`;
+
+                wpImportBtn.disabled = false;
+            });
+
+            wpImportBtn.addEventListener('click', async () => {
+                for (const entry of whitePagesResults) {
+                    await window.electronAPI.saveAddressBookEntry({ ...entry, preserveNotes: true });
+                }
+                whitePagesModal.style.display = "none";
+            });
+
 
             document.getElementById("yappModalDirButton").addEventListener("click", async () => {
                 const dir = await window.electronAPI.pickDirectory();
@@ -1207,9 +1463,44 @@
                 });
             });
 
-            sendBtn.addEventListener('click', () => {
-                composeModal.style.display = "flex";
+            document.getElementById("composeWindow")
+                .addEventListener("click", (e) => e.stopPropagation());
+
+            composeMsgBtn.addEventListener('click', () => {
+                openComposeModal();
+                //composeModal.style.display = "flex";
             });
+
+            async function openComposeModal(prefill = {}) {
+                const list = document.getElementById("callsignList");
+                const toInput = document.getElementById("composeTo");
+
+                // Allow passing a string directly: openComposeModal("K4ABC")
+                if (typeof prefill === "string") {
+                    prefill = { to: prefill };
+                }
+
+                // Clear old entries
+                list.innerHTML = "";
+
+                // Load address book entries
+                const entries = await window.electronAPI.getAddressBook();
+
+                for (const entry of entries) {
+                    const opt = document.createElement("option");
+                    opt.value = entry.callsign;  // what gets inserted into the input
+                    opt.label = entry.name || ""; // optional visible label
+                    list.appendChild(opt);
+                }
+
+                // Prefill if needed
+                if (prefill.to) {
+                    toInput.value = prefill.to;
+                }
+
+                // Show modal
+                composeModal.style.display = "flex";
+            }
 
             composeCancelBtn.addEventListener('click', () => {
                 composeModal.style.display = "none";
@@ -1263,20 +1554,7 @@
                     appendCommand('error', 'All fields are required');
                     return;
                 }
-                //await ensureBbsConnected();
-                /*
-                // If link is down, reconnect before sending
-                if (!bbsLinkUp) {
-                    appendCommand('info', 'Link is down, attempting to reconnect...');
-                    try {
-                        await window.vara.sendCommand(`CONNECT ${appSettings.myCall} ${appSettings.bbsCall}${appSettings.digi1 ? " VIA " + appSettings.digi1 : ""}${appSettings.digi2 ? appSettings.digi2 : ""}`);
-                        appendCommand('info', 'Reconnect command sent');
-                    } catch (err) {
-                        appendCommand('error', 'Reconnect failed: ' + err.message);
-                        return;
-                    }
-                }
-                */
+
                 // Build BBS message format
                 const cmd = (type === "P") ? `SP ${to}\r` : `SB ${to}\r`;
                 const msg =
@@ -1309,21 +1587,25 @@
             composeBody.value = "";
             composeType.value = "P";
 
-            composeModal.addEventListener('click', (e) => {
+            /* composeModal.addEventListener('click', (e) => {
                 if (e.target === composeModal) {
                     composeModal.style.display = "none";
                 }
-            });
+            }); */
+
+
         });
         console.log("RENDERER LOADED");
     </script>
 
     <div id="composeModal" class="modal-overlay">
-        <div class="modal-window">
+        <div class="modal-window" id="composeWindow">
             <h3>Compose BBS Message</h3>
 
             <label>To:</label><br>
-            <input id="composeTo" class="modal-input"><br>
+
+            <input id="composeTo" list="callsignList">
+            <datalist id="callsignList"></datalist><br><br>
 
             <label>Subject:</label><br>
             <input id="composeSubject" class="modal-input"><br>
@@ -1344,22 +1626,31 @@
         </div>
     </div>
 
-
     <div id="addressBookModal" class="modal-overlay">
         <div class="modal-window">
             <h3>Address Book Add</h3>
 
-            <label>Callsign:</label><br>
-            <input id="addCallsign" class="modal-input"><br>
+            <div class="ab-grid">
+                <div>
+                    <label>Callsign:</label><br>
+                    <input id="addCallsign" class="modal-input">
+                </div>
 
-            <label>Name:</label><br>
-            <input id="addName" class="modal-input"><br>
-
-            <label>Location:</label><br>
-            <input id="addLocation" class="modal-input"><br>
+                <div>
+                    <label>Name:</label><br>
+                    <input id="addName" class="modal-input">
+                </div>
+                <div>
+                    <label>Zipcode:</label><br>
+                    <input id="addZipcode" class="modal-input">
+                </div>
+            </div>
 
             <label>Home BBS:</label><br>
             <input id="addHomeBBS" class="modal-input"><br>
+
+            <label>Location:</label><br>
+            <input id="addAddress" class="modal-input"><br>
 
             <label>Notes:</label><br>
             <textarea id="addNotes" rows="4" class="modal-input"></textarea>
@@ -1374,23 +1665,61 @@
     <div id="addressBookViewModal" class="modal-overlay">
         <div class="modal-window-2">
             <h3>Address Book List</h3>
-            <table class="ab-table">
-                <thead>
-                    <tr>
-                        <th>Callsign</th>
-                        <th>Name</th>
-                        <th>Location</th>
-                        <th>Home BBS</th>
-                        <th>Notes</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="addressBookTableBody"></tbody>
-            </table>
+            <div class="ab-table-container">
+
+                <table class="ab-table">
+                    <colgroup>
+                        <col style="width: 90px;"> <!-- Callsign -->
+                        <col style="width: 90px;"> <!-- Name -->
+                        <col style="width: 200px;"> <!-- Home BBS -->
+                        <col style="width: 90px;"> <!-- Zipcode -->
+                        <col style="width: auto;"> <!-- Location -->
+                        <col style="width: auto;"> <!-- Notes -->
+                        <col style="width: 120px;"> <!-- Actions -->
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th data-column="callsign">Callsign</th>
+                            <th data-column="name">Name</th>
+                            <th data-column="homebbs">Home BBS</th>
+                            <th data-column="zipcode">Zipcode</th>
+                            <th data-column="address">Location</th>
+                            <th data-column="notes">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="addressBookTableBody"></tbody>
+                </table>
+            </div>
 
             <div style="text-align:right;">
                 <button id="addressBookViewClose" class="modal-btn cancel">Close</button>
             </div>
+        </div>
+    </div>
+    <div id="whitePagesModal" class="modal-overlay">
+        <div class="modal-window" id="whitePagesWindow">
+
+            <h3>Import Addresses from WhitePages</h3>
+
+            <div class="wp-row">
+                <div class="wp-col">
+                    <label>Query:</label>
+                    <input id="wpQuery" class="modal-input" placeholder="Example:I@ NC">
+                </div>
+
+                <button id="wpRunQueryBtn" class="modal-btn send">Run Query</button>
+            </div>
+
+            <label>Results:</label>
+            <div id="wpResults" class="wp-results">
+                Querying BBS...
+            </div>
+
+            <div class="wp-footer">
+                <button id="wpCancelBtn" class="modal-btn cancel">Close</button>
+                <button id="wpImportBtn" class="modal-btn send" disabled>Import</button>
+            </div>
+
         </div>
     </div>
 
