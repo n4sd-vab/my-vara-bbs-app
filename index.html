@@ -145,7 +145,7 @@
             overflow-y: auto;
             /* only this scrolls */
         }
-        
+
         .msg-row pre {
             margin: 0;
             padding: 0;
@@ -661,46 +661,7 @@
             `;
             }
 
-            function parseListLine(line) {
-                const parts = line.trim().split(/\s+/);
 
-                const msgNum = parseInt(parts[0]);
-                const date = parts[1];
-                const typeCode = parts[2];
-                const size = parseInt(parts[3]);
-                const toCall = parts[4];
-
-                let at = "";
-                let fromCall = "";
-                let subject = "";
-
-                // ⭐ Detect AT by pattern, not position
-                if (parts[5].startsWith("@")) {
-                    // AT is present
-                    at = parts[5];
-                    fromCall = parts[6];
-                    subject = parts.slice(7).join(" ");
-                } else {
-                    // AT is missing
-                    at = "";
-                    fromCall = parts[5];
-                    subject = parts.slice(6).join(" ");
-                }
-
-                const type = typeCode.startsWith("B") ? "bulletin" : "private";
-
-                return {
-                    msgNum,
-                    date,
-                    typeCode,
-                    type,
-                    size,
-                    recipient: toCall,
-                    at,
-                    sender: fromCall,
-                    subject
-                };
-            }
 
             function clearMessageWindows() {
                 msgList.innerHTML = "";
@@ -800,6 +761,12 @@
                             return;
                         }
 
+                        // If body is missing, request it from BBS
+                        if (!msg.body || msg.body.trim() === "") {
+                            await ensureBbsConnected();
+                            window.electronAPI.readMessage(msg.msgNum);
+                        }
+
                         // Render into right pane
                         const viewer = document.getElementById("msgView");
                         viewer.innerHTML = `
@@ -807,7 +774,7 @@
                             <strong>To:</strong> ${msg.recipient}<br>
                             <strong>Date:</strong> ${msg.date}<br>
                             <strong>Subject:</strong> ${msg.subject}<br><br>
-                            <pre>${msg.body}</pre>
+                            <pre>${msg.body || "(Fetching message body...)"}</pre>
                         `;
                     });
                 });
@@ -899,6 +866,18 @@
                     msgView.innerText = "Retrieving message...";
                     window.electronAPI.sendToBbs(`R ${msgNum}`);
                 }
+            }
+
+            function displayMessageBody(msg) {
+                const viewer = document.getElementById("msgView");
+
+                viewer.innerHTML = `
+                    <strong>From:</strong> ${msg.sender}<br>
+                    <strong>To:</strong> ${msg.recipient}<br>
+                    <strong>Date:</strong> ${msg.date}<br>
+                    <strong>Subject:</strong> ${msg.subject}<br><br>
+                    <pre>${msg.body}</pre>
+                `;
             }
 
             // Attach handlers to Edit/Delete buttons in address book view
@@ -1179,6 +1158,10 @@
                 whitePagesModal.style.display = "none";
             });
 
+            // Listen for message body responses from main process
+            window.electronAPI.onMessageBody((msg) => {
+                displayMessageBody(msg.msgNum, msg.body);
+            });
 
             document.getElementById("yappModalDirButton").addEventListener("click", async () => {
                 const dir = await window.electronAPI.pickDirectory();

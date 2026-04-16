@@ -35,10 +35,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     getMessageById: (id) => ipcRenderer.invoke("getMessageById", id),
 
-    upsertMessageListEntry: (msg) => ipcRenderer.invoke("upsertMessageListEntry", msg),
-
-    saveMessageBody: (msg) => ipcRenderer.invoke("saveMessageBody", msg),
-
     sendToBbs: (cmd) => ipcRenderer.send("send-to-bbs", cmd),
 
     onReplyToSender: (callback) =>
@@ -72,6 +68,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.on("open-whitepages-import", () => callback()),
 
     onWhitePagesLine: (callback) => ipcRenderer.on("whitepages-line", (_e, entry) => callback(entry)),
+
+    readMessage: (msgNum) => ipcRenderer.send("bbs:read-message", msgNum),
+
+    onMessageBody: (callback) => ipcRenderer.on("bbs:message-body", (event, msg) => callback(msg)),
 
     onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback()),
 

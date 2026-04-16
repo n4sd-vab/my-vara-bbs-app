@@ -288,6 +288,68 @@ function parseWhitePagesLine(line) {
   };
 }
 
+
+function parseListLine(line) {
+  const parts = line.trim().split(/\s+/);
+
+  const msgNum = parseInt(parts[0]);
+  const date = parts[1];
+  const typeCode = parts[2];
+  const size = parseInt(parts[3]);
+  const toCall = parts[4];
+
+  let at = "";
+  let fromCall = "";
+  let subject = "";
+
+  // ⭐ Detect AT by pattern, not position
+  if (parts[5].startsWith("@")) {
+    // AT is present
+    at = parts[5];
+    fromCall = parts[6];
+    subject = parts.slice(7).join(" ");
+  } else {
+    // AT is missing
+    at = "";
+    fromCall = parts[5];
+    subject = parts.slice(6).join(" ");
+  }
+
+  const type = typeCode.startsWith("B") ? "bulletin" : "private";
+
+  return {
+    msgNum,
+    date,
+    typeCode,
+    type,
+    size,
+    recipient: toCall,
+    at,
+    sender: fromCall,
+    subject
+  };
+}
+
+function upsertMessageListEntry(msg) {
+  const stmt = db.prepare(`
+        INSERT INTO messages (msgNum, date, typeCode,type, size, recipient, at, sender, subject, read, localOnly, deleted)
+        VALUES (@msgNum, @date, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 0, 0, 0)
+        ON CONFLICT(msgNum) DO UPDATE SET
+            date=@date,
+            sender=@sender,
+            recipient=@recipient,
+            subject=@subject
+    `);
+
+  stmt.run(msg);
+}
+
+function saveMessageBody(msg) {
+  db.prepare(`
+        UPDATE messages SET body=@body WHERE msgNum=@msgNum
+    `).run(msg);
+}
+
 app.whenReady().then(() => {
   createWindow();
 
@@ -819,6 +881,8 @@ ipcMain.handle('vara-connect', async () => {
   });
 });
 
+
+
 //----------------------YAPP SEND LOGIC----------------------//
 function setInYappSend(val) {
   console.log("setInYappSend", val);
@@ -1202,24 +1266,11 @@ ipcMain.handle("getMessageById", (event, id) => {
   return db.prepare("SELECT * FROM messages WHERE id=?").get(id);
 });
 
-ipcMain.handle("upsertMessageListEntry", (event, msg) => {
-  const stmt = db.prepare(`
-        INSERT INTO messages (msgNum, date, typeCode,type, size, recipient, at, sender, subject, read, localOnly, deleted)
-        VALUES (@msgNum, @date, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 0, 0, 0)
-        ON CONFLICT(msgNum) DO UPDATE SET
-            date=@date,
-            sender=@sender,
-            recipient=@recipient,
-            subject=@subject
-    `);
-
-  stmt.run(msg);
-});
-
-ipcMain.handle("saveMessageBody", (event, msg) => {
-  db.prepare(`
-        UPDATE messages SET body=@body WHERE msgNum=@msgNum
-    `).run(msg);
+ipcMain.on("bbs:read-message", (event, msgNum) => {
+    inReadMode = false;
+    currentReadMsgNum = msgNum;
+    readBuffer = "";
+    if (dataSocket) dataSocket.write(`R ${msgNum}\r`);
 });
 
 
@@ -1227,9 +1278,9 @@ ipcMain.on("send-to-bbs", (event, cmd) => {
   console.log("MAIN: sending to DATA port:", cmd);
   console.log("Sending BBS command:", cmd, "via DATA socket");
   if (cmd.startsWith("L")) {
-        messageListMode = "bbs";
-        listBuffer = "";
-    }
+    messageListMode = "bbs";
+    listBuffer = "";
+  }
   if (dataSocket) dataSocket.write(cmd + "\r");
 });
 
