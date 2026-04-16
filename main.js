@@ -84,6 +84,19 @@ let yappSend = null; // holds the sender state machine instance
 let whitePagesMode = false;
 let whitePagesResults = [];
 
+let messageListMode = "local";   // or "none", depending on your preference
+let listBuffer = "";
+
+// -------------------------
+// READ MODE STATE
+// -------------------------
+let inReadMode = false;
+let currentReadMsgNum = null;
+let currentReadBody = [];
+let readBuffer = "";
+
+
+
 const menuTemplate = [
   {
     label: "File",
@@ -196,17 +209,21 @@ function createWindow() {
 function initializeDatabase() {
   db.exec(`
         CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY,
-            msgNum INTEGER,
-            type TEXT,
-            date TEXT,
-            sender TEXT,
-            recipient TEXT,
-            at TEXT,
-            subject TEXT,
-            body TEXT,
-            read INTEGER DEFAULT 0
-        );
+          id INTEGER PRIMARY KEY,
+          msgNum INTEGER,
+          date TEXT,
+          typeCode TEXT,
+          type TEXT,
+          size INTEGER,
+          recipient TEXT,
+          at TEXT,
+          sender TEXT,
+          subject TEXT,
+          body TEXT,
+          read INTEGER DEFAULT 0,
+          localOnly INTEGER DEFAULT 0,
+          deleted INTEGER DEFAULT 0
+);
 
         CREATE TABLE IF NOT EXISTS address_book (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,7 +242,7 @@ function initializeDatabase() {
             content TEXT
         );
 
-        CREATE INDEX IF NOT EXISTS idx_messages_msgNum ON messages(msgNum);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_msgNum ON messages(msgNum);
 
         CREATE INDEX IF NOT EXISTS idx_address_callsign ON address_book(callsign);
 
@@ -643,7 +660,7 @@ ipcMain.handle('vara-connect', async () => {
           return;
         }
         // -------------------------
-        // 2. YAPP RECEIVE MODE
+        // 3. YAPP RECEIVE MODE
         // -------------------------
         if (inYapp) {
           if (!yappReceiver || typeof yappReceiver.feed !== 'function') {
@@ -655,15 +672,119 @@ ipcMain.handle('vara-connect', async () => {
         }
 
         // -------------------------
-        // 3. FILE LIST MODE
+        // 4. FILE LIST MODE
         // -------------------------
         if (inFileList) {
           handleFileListText(data.toString());
           return;   // do NOT fall through to normal text logic
         }
+        // ----------------------------------------------------
+        // 5. LIST MODE (BBS message list)
+        // ----------------------------------------------------
+        if (messageListMode === "bbs") {
 
+          const text = data.toString();
+          listBuffer += text;
 
+          const parts = listBuffer.split('\r');
 
+          for (let i = 0; i < parts.length - 1; i++) {
+            const line = parts[i].trim();
+            if (!line) continue;
+
+            // End of LIST output
+            if (line === ">") {
+              messageListMode = "local";
+              listBuffer = "";
+              mainWindow.webContents.send("bbs:list-end");
+              return;
+            }
+
+            // LIST line pattern
+            const msgListPattern = /^\s*\d+\s+\d{1,2}-[A-Za-z]{3}\s+[A-Z$]{1,3}\s+\d+/;
+
+            if (msgListPattern.test(line)) {
+              const parsed = parseListLine(line);
+
+              // Save to DB
+              upsertMessageListEntry(parsed);
+
+              // Send to renderer
+              mainWindow.webContents.send("bbs:list-line", parsed);
+            }
+          }
+
+          // Save incomplete tail
+          listBuffer = parts[parts.length - 1];
+          return;
+        }
+        // ----------------------------------------------------
+        // 6. READ MODE (message body retrieval)
+        // ----------------------------------------------------
+
+        // Detect READ start
+        if (!inReadMode) {
+          const text = data.toString();
+          readBuffer += text;
+
+          const parts = readBuffer.split('\r');
+
+          for (let i = 0; i < parts.length - 1; i++) {
+            const line = parts[i].trim();
+
+            const readStart = line.match(/^:(\d+)/);
+            if (readStart) {
+              inReadMode = true;
+              currentReadMsgNum = parseInt(readStart[1]);
+              currentReadBody = [];
+              readBuffer = "";   // reset buffer for body
+              return;            // swallow start line
+            }
+          }
+
+          readBuffer = parts[parts.length - 1];
+          // Not in READ mode yet → fall through to normal text
+        }
+
+        // Accumulate READ body
+        if (inReadMode) {
+          const text = data.toString();
+          readBuffer += text;
+
+          const parts = readBuffer.split('\r');
+
+          for (let i = 0; i < parts.length - 1; i++) {
+            const line = parts[i];
+
+            // End of message body = blank line
+            if (line.trim() === "") {
+              inReadMode = false;
+
+              const body = currentReadBody.join("\n");
+
+              // Save to DB
+              saveMessageBody({
+                msgNum: currentReadMsgNum,
+                body
+              });
+
+              // Send to renderer
+              mainWindow.webContents.send("bbs:message-body", {
+                msgNum: currentReadMsgNum,
+                body
+              });
+
+              readBuffer = "";
+              return;
+            }
+
+            // Accumulate body line
+            currentReadBody.push(line);
+          }
+
+          readBuffer = parts[parts.length - 1];
+          return;   // swallow READ lines
+        }
         // -------------------------
         // 4. NORMAL BBS TEXT MODE
         // -------------------------
@@ -1073,9 +1194,42 @@ ipcMain.handle("save-setting", async (_event, { key, value }) => {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 });
 
-ipcMain.on("bbs-send", (event, cmd) => {
+ipcMain.handle("getMessages", () => {
+  return db.prepare("SELECT * FROM messages WHERE deleted=0").all();
+});
+
+ipcMain.handle("getMessageById", (event, id) => {
+  return db.prepare("SELECT * FROM messages WHERE id=?").get(id);
+});
+
+ipcMain.handle("upsertMessageListEntry", (event, msg) => {
+  const stmt = db.prepare(`
+        INSERT INTO messages (msgNum, date, typeCode,type, size, recipient, at, sender, subject, read, localOnly, deleted)
+        VALUES (@msgNum, @date, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 0, 0, 0)
+        ON CONFLICT(msgNum) DO UPDATE SET
+            date=@date,
+            sender=@sender,
+            recipient=@recipient,
+            subject=@subject
+    `);
+
+  stmt.run(msg);
+});
+
+ipcMain.handle("saveMessageBody", (event, msg) => {
+  db.prepare(`
+        UPDATE messages SET body=@body WHERE msgNum=@msgNum
+    `).run(msg);
+});
+
+
+ipcMain.on("send-to-bbs", (event, cmd) => {
   console.log("MAIN: sending to DATA port:", cmd);
   console.log("Sending BBS command:", cmd, "via DATA socket");
+  if (cmd.startsWith("L")) {
+        messageListMode = "bbs";
+        listBuffer = "";
+    }
   if (dataSocket) dataSocket.write(cmd + "\r");
 });
 

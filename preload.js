@@ -31,7 +31,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     showMessageContextMenu: (data) =>
         ipcRenderer.send("show-message-context-menu", data),
 
-    sendToBbs: (cmd) => ipcRenderer.send("bbs-send", cmd),
+    getMessages: () => ipcRenderer.invoke("getMessages"),
+
+    getMessageById: (id) => ipcRenderer.invoke("getMessageById", id),
+
+    upsertMessageListEntry: (msg) => ipcRenderer.invoke("upsertMessageListEntry", msg),
+
+    saveMessageBody: (msg) => ipcRenderer.invoke("saveMessageBody", msg),
+
+    sendToBbs: (cmd) => ipcRenderer.send("send-to-bbs", cmd),
 
     onReplyToSender: (callback) =>
         ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),

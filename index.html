@@ -80,7 +80,13 @@
             padding: 10px;
         }
 
-        #msgList,
+        #msgList {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            /* prevent tabs from scrolling */
+        }
+
         #msgView {
             flex: 1;
             overflow-y: auto;
@@ -123,6 +129,38 @@
 
         .send-row input {
             flex: 1;
+        }
+
+
+        #messageTabs {
+            display: flex;
+            flex: 0 0 auto;
+            background: #ddd;
+            border-bottom: 1px solid #aaa;
+            font-family: monospace;
+        }
+
+        #messageList {
+            flex: 1 1 auto;
+            overflow-y: auto;
+            /* only this scrolls */
+        }
+        
+        .msg-row pre {
+            margin: 0;
+            padding: 0;
+        }
+
+        .msg-tab {
+            padding: 6px 12px;
+            cursor: pointer;
+            user-select: none;
+            color: #333;
+        }
+
+        .msg-tab.active {
+            background: #bbb;
+            font-weight: bold;
         }
 
         .msgLink {
@@ -471,15 +509,28 @@
         <!-- RECEIVED DATA ( About 30 lines) -->
         <div id="mainContent">
             <!-- LEFT: Message List -->
-            <div id="msgList" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5); 
-                font-family:monospace; padding:8px; border: 1px solid black; border-radius: 8px;">
+            <div id="msgList" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5);
+                font-family:monospace; padding:0; border: 1px solid black; border-radius: 8px;">
+
+                <!-- ⭐ Tabs go here -->
+                <div id="messageTabs">
+                    <div class="msg-tab active" data-tab="private">Private</div>
+                    <div class="msg-tab" data-tab="bulletin">Bulletins</div>
+                    <div class="msg-tab" data-tab="sent">Sent</div>
+                    <div class="msg-tab" data-tab="outbox">Outbox</div>
+                </div>
+
+                <!-- ⭐ Message list content goes here -->
+                <div id="messageList" style="padding:8px;"></div>
+
             </div>
             <!-- RIGHT: Message Viewer -->
             <div id="msgView" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5);
-                 white-space:pre; font-family:monospace; padding:8px;
-                 border: 1px solid black; border-radius: 8px;">
+                white-space:pre; font-family:monospace; padding:8px;
+                border: 1px solid black; border-radius: 8px;">
                 <em>Select a message to view it</em><br>
             </div>
+
         </div>
         <!-- SEND DATA (single line) -->
         <div id="sendSection" class="send-row">
@@ -493,6 +544,12 @@
             let connected = false;
             let bbsPromptReady = false;
             let whitePagesResults = [];
+            let currentMessageTab = "private";
+            let messageListMode = "local"; // "local" | "bbs"
+
+            let inMessageRead = false;
+            let currentMsgNum = null;
+            let currentBody = [];
 
             // Load settings ONCE
             const appSettings = await window.settings.get();
@@ -604,6 +661,47 @@
             `;
             }
 
+            function parseListLine(line) {
+                const parts = line.trim().split(/\s+/);
+
+                const msgNum = parseInt(parts[0]);
+                const date = parts[1];
+                const typeCode = parts[2];
+                const size = parseInt(parts[3]);
+                const toCall = parts[4];
+
+                let at = "";
+                let fromCall = "";
+                let subject = "";
+
+                // ⭐ Detect AT by pattern, not position
+                if (parts[5].startsWith("@")) {
+                    // AT is present
+                    at = parts[5];
+                    fromCall = parts[6];
+                    subject = parts.slice(7).join(" ");
+                } else {
+                    // AT is missing
+                    at = "";
+                    fromCall = parts[5];
+                    subject = parts.slice(6).join(" ");
+                }
+
+                const type = typeCode.startsWith("B") ? "bulletin" : "private";
+
+                return {
+                    msgNum,
+                    date,
+                    typeCode,
+                    type,
+                    size,
+                    recipient: toCall,
+                    at,
+                    sender: fromCall,
+                    subject
+                };
+            }
+
             function clearMessageWindows() {
                 msgList.innerHTML = "";
                 msgView.innerHTML = "<em>Select a message to view it</em><br>";
@@ -682,8 +780,95 @@
                 });
             }
 
+            function attachMessageRowHandlers() {
+                const rows = document.querySelectorAll(".msg-row");
+
+                rows.forEach(row => {
+                    row.addEventListener("click", async () => {
+                        // Remove previous selection highlight
+                        rows.forEach(r => r.classList.remove("selected"));
+                        row.classList.add("selected");
+
+                        const id = row.dataset.id;
+
+                        // Fetch full message from DB
+                        let msg = null;
+                        try {
+                            msg = await window.electronAPI.getMessageById(id);
+                        } catch (err) {
+                            console.error("Failed to load message", err);
+                            return;
+                        }
+
+                        // Render into right pane
+                        const viewer = document.getElementById("msgView");
+                        viewer.innerHTML = `
+                            <strong>From:</strong> ${msg.sender}<br>
+                            <strong>To:</strong> ${msg.recipient}<br>
+                            <strong>Date:</strong> ${msg.date}<br>
+                            <strong>Subject:</strong> ${msg.subject}<br><br>
+                            <pre>${msg.body}</pre>
+                        `;
+                    });
+                });
+            }
+
+            async function renderMessageList() {
+                const list = document.getElementById("messageList"); // your left pane tbody/ul/etc
+                let messages = [];
+
+                try {
+                    messages = await window.electronAPI.getMessages();  // you’ll add this IPC
+                } catch (err) {
+                    console.error("Failed to load messages", err);
+                    return;
+                }
+
+                // ⭐ Filter based on current tab
+                let filtered = messages.filter(m => {
+                    if (currentMessageTab === "private") return m.type === "private" && !m.deleted;
+                    if (currentMessageTab === "bulletin") return m.type === "bulletin" && !m.deleted;
+                    if (currentMessageTab === "sent") return m.type === "sent" && m.localOnly && !m.deleted;
+                    if (currentMessageTab === "outbox") return m.type === "outbox" && m.localOnly && !m.deleted;
+                    return false;
+                });
+
+                // ⭐ Sort newest first (optional)
+                filtered.sort((a, b) => (b.msgNum || 0) - (a.msgNum || 0));
+
+                // ⭐ Render
+                list.innerHTML = filtered.map(m => `
+                    <div class="msg-row" data-id="${m.id}" data-msgnum="${m.msgNum}">
+                        <pre>${formatListRow(m)}</pre>
+                    </div>
+                `).join("");
+
+                attachMessageRowHandlers();
+            }
+
+            function formatListRow(m) {
+                const pad = (str, len) => (str + " ".repeat(len)).slice(0, len);
+
+                return [
+                    pad(m.msgNum.toString(), 5),
+                    pad(m.date, 6),
+                    pad(m.typeCode, 2),
+                    pad((m.size || 0).toString(), 5),
+                    pad(m.recipient, 7),
+                    pad(m.at, 7),
+                    pad(m.sender, 7),
+                    m.subject
+                ].join(" ");
+            }
+
             async function sendBbsCommand(cmd) {
                 await ensureBbsConnected();
+                if (cmd.startsWith("L")) {
+                    messageListMode = "bbs";
+                    const messageList = document.getElementById("messageList");
+                    messageList.innerHTML = ""; // clear previous content
+                }
+
                 window.electronAPI.sendToBbs(cmd);
             }
 
@@ -704,6 +889,18 @@
                 statusVara.textContent = connected ? "Connected" : "Disconnected";
                 statusVara.style.color = connected ? "#0f0" : "#f33";
             }
+
+            async function requestMessageBody(msgNum) {
+                const msg = await window.electronAPI.getMessageByNum(msgNum);
+
+                if (msg.body && msg.body.length > 0) {
+                    msgView.innerText = msg.body;
+                } else {
+                    msgView.innerText = "Retrieving message...";
+                    window.electronAPI.sendToBbs(`R ${msgNum}`);
+                }
+            }
+
             // Attach handlers to Edit/Delete buttons in address book view
             function attachAddressBookRowHandlers() {
                 document.querySelectorAll(".ab-edit").forEach(btn => {
@@ -791,6 +988,13 @@
             window.electronAPI.onToggleVaraConsole((visible) => {
                 const section = document.getElementById("varaConsoleSection");
                 section.style.display = visible ? "block" : "none";
+            });
+
+            document.querySelectorAll(".msg-row").forEach(row => {
+                row.addEventListener("click", () => {
+                    const msgNum = row.dataset.msgnum;
+                    requestMessageBody(msgNum);
+                });
             });
 
             const cancelBtn = document.getElementById("addressBookCancelBtn");
@@ -908,49 +1112,6 @@
                 addressBookViewModal.style.display = "flex";
                 renderAddressBookTable();
             });
-
-            /* window.electronAPI.onOpenAddressBookView(async () => {
-      addressBookViewModal.style.display = "flex";
-
-                const tbody = document.getElementById("addressBookTableBody");
-                let entries = [];
-
-                try {
-                    entries = await window.electronAPI.getAddressBook();
-
-                    entries.sort((a, b) => {
-                        const col = addressBookSort.column;
-                        const dir = addressBookSort.direction === "asc" ? 1 : -1;
-
-                        return a[col].localeCompare(b[col], undefined, { numeric: true }) * dir;
-                    });
-
-                    console.log("Address book entries:", entries);
-                } catch (err) {
-                    console.error("Failed to load address book", err);
-                }
-
-                tbody.innerHTML = entries.map(e => `
-                    <tr data-id="${e.id}">
-                    <td>
-                        <span class="ab-callsign" data-callsign="${e.callsign}">
-                            ${e.callsign}
-                        </span>
-                    </td>
-                    <td class="ab-name">${e.name || ""}</td>
-                    <td class="ab-homebbs">${e.homebbs || ""}</td>
-                    <td class="ab-zipcode">${e.zipcode || ""}</td>
-                    <td class="ab-address">${e.address || ""}</td>
-                    <td class="ab-notes">${e.notes || ""}</td>
-                    <td>
-                        <button class="ab-edit" data-id="${e.id}">Edit</button>
-                        <button class="ab-delete" data-id="${e.id}">Delete</button>
-                    </td>
-                    </tr>
-                `).join("");
-
-                attachAddressBookRowHandlers();
-            }); */
 
             document.addEventListener("click", (e) => {
                 if (e.target.classList.contains("ab-callsign")) {
@@ -1378,10 +1539,23 @@
                 }
             });
 
+            // Tabbed Message List
+            document.querySelectorAll(".msg-tab").forEach(tab => {
+                tab.addEventListener("click", () => {
+                    // Update active tab
+                    document.querySelectorAll(".msg-tab").forEach(t => t.classList.remove("active"));
+                    tab.classList.add("active");
+
+                    currentMessageTab = tab.dataset.tab;
+                    messageListMode = "local"; // reset to local mode when switching tabs
+
+                    renderMessageList();  // ⭐ re-render the left pane
+                });
+            });
             // List Mine (LM) updated to use sendBbsCommand helper which ensures BBS connection and routes through main process
 
             listMineBtn.addEventListener("click", async () => {
-                clearMessageWindows();
+                // clearMessageWindows();
                 appendCommand("local", "TX: LM");
                 try {
                     await sendBbsCommand("LM");
@@ -1391,7 +1565,7 @@
             });
 
             listBullBtn.addEventListener('click', async () => {
-                clearMessageWindows();
+                // clearMessageWindows();
                 appendCommand('local', 'TX: LB');
                 try {
                     await sendBbsCommand("LB");
@@ -1401,7 +1575,7 @@
             });
 
             listWxBtn.addEventListener('click', async () => {
-                clearMessageWindows();
+                // clearMessageWindows();
                 appendCommand('local', 'TX: LW');
                 try {
                     await sendBbsCommand("L> WX");
@@ -1412,7 +1586,7 @@
 
             // List All (L)
             listNewBtn.addEventListener('click', async () => {
-                clearMessageWindows();
+                //clearMessageWindows();
                 appendCommand('local', 'TX: L');
                 try {
                     await sendBbsCommand("L");
