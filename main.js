@@ -94,6 +94,7 @@ let inReadMode = false;
 let currentReadMsgNum = null;
 let currentReadBody = [];
 let readBuffer = "";
+let footerSeen = false;
 
 
 
@@ -411,6 +412,29 @@ function sendRawBytes(buffer) {
   } catch (err) {
     console.error("sendRawBytes error:", err);
   }
+}
+
+function finishReadMode() {
+  if (!inReadMode) return;  // Prevent double-ending
+
+    inReadMode = false;
+
+    const body = currentReadBody.join("\n");
+    console.log("READ MODE END for message", currentReadMsgNum);
+    console.log("READ MODE: accumulated body length =", currentReadBody.length);
+
+    saveMessageBody({
+        msgNum: currentReadMsgNum,
+        body
+    });
+
+    mainWindow.webContents.send("bbs:message-body", {
+        msgNum: currentReadMsgNum,
+        body
+    });
+
+    currentReadBody = [];
+    readBuffer = "";
 }
 
 function handleFileListText(text) {
@@ -788,18 +812,20 @@ ipcMain.handle('vara-connect', async () => {
         if (!inReadMode) {
           const text = data.toString();
           readBuffer += text;
-
+          console.log("Not in read mode");
           const parts = readBuffer.split('\r');
 
           for (let i = 0; i < parts.length - 1; i++) {
             const line = parts[i].trim();
 
-            const readStart = line.match(/^:(\d+)/);
+            const readStart = line.match(/^:(\d+)/) || line.match(/^Message\s+#?(\d+)/i);
+            console.log("readStart = ", readStart);
             if (readStart) {
               inReadMode = true;
               currentReadMsgNum = parseInt(readStart[1]);
               currentReadBody = [];
               readBuffer = "";   // reset buffer for body
+              console.log("READ MODE START for message", currentReadMsgNum);
               return;            // swallow start line
             }
           }
@@ -816,36 +842,32 @@ ipcMain.handle('vara-connect', async () => {
           const parts = readBuffer.split('\r');
 
           for (let i = 0; i < parts.length - 1; i++) {
-            const line = parts[i];
+            const raw = parts[i];
+            const line = raw.trim();
 
-            // End of message body = blank line
-            if (line.trim() === "") {
-              inReadMode = false;
+            console.log("READ MODE line:", JSON.stringify(line));
 
-              const body = currentReadBody.join("\n");
-
-              // Save to DB
-              saveMessageBody({
-                msgNum: currentReadMsgNum,
-                body
-              });
-
-              // Send to renderer
-              mainWindow.webContents.send("bbs:message-body", {
-                msgNum: currentReadMsgNum,
-                body
-              });
-
-              readBuffer = "";
-              return;
+            // ⭐ END OF MESSAGE: explicit footer
+            if (/^\[End of Message #(\d+)/i.test(line)) {
+              footerSeen = true;
+              console.log("END detected: explicit footer");
+              finishReadMode();
+              continue;
             }
 
-            // Accumulate body line
-            currentReadBody.push(line);
+            // ⭐ END OF MESSAGE: prompt ONLY if it's the whole line
+            if (!footerSeen && /^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
+              console.log("END detected: prompt-only line");
+              finishReadMode();
+              continue;
+            }
+
+            // ⭐ Normal body line (including blank lines)
+            currentReadBody.push(raw);
           }
 
           readBuffer = parts[parts.length - 1];
-          return;   // swallow READ lines
+          return;
         }
         // -------------------------
         // 4. NORMAL BBS TEXT MODE
@@ -1267,12 +1289,14 @@ ipcMain.handle("getMessageById", (event, id) => {
 });
 
 ipcMain.on("bbs:read-message", (event, msgNum) => {
-    inReadMode = false;
-    currentReadMsgNum = msgNum;
-    readBuffer = "";
-    if (dataSocket) dataSocket.write(`R ${msgNum}\r`);
-});
+  currentReadMsgNum = msgNum;
+  currentReadBody = [];
+  readBuffer = "";
 
+  inReadMode = true;   // ⭐ START READ MODE HERE
+
+  if (dataSocket) dataSocket.write(`R ${msgNum}\r`);
+});
 
 ipcMain.on("send-to-bbs", (event, cmd) => {
   console.log("MAIN: sending to DATA port:", cmd);

@@ -767,14 +767,11 @@
                             window.electronAPI.readMessage(msg.msgNum);
                         }
 
+                        showToast(`Loading message #${msg.msgNum}…`);
                         // Render into right pane
                         const viewer = document.getElementById("msgView");
                         viewer.innerHTML = `
-                            <strong>From:</strong> ${msg.sender}<br>
-                            <strong>To:</strong> ${msg.recipient}<br>
-                            <strong>Date:</strong> ${msg.date}<br>
-                            <strong>Subject:</strong> ${msg.subject}<br><br>
-                            <pre>${msg.body || "(Fetching message body...)"}</pre>
+                            <pre>${msg.body || "(Fetching message...)"}</pre>
                         `;
                     });
                 });
@@ -868,14 +865,10 @@
                 }
             }
 
-            function displayMessageBody(msg) {
+            function displayMessage(msg) {
                 const viewer = document.getElementById("msgView");
 
                 viewer.innerHTML = `
-                    <strong>From:</strong> ${msg.sender}<br>
-                    <strong>To:</strong> ${msg.recipient}<br>
-                    <strong>Date:</strong> ${msg.date}<br>
-                    <strong>Subject:</strong> ${msg.subject}<br><br>
                     <pre>${msg.body}</pre>
                 `;
             }
@@ -1160,7 +1153,13 @@
 
             // Listen for message body responses from main process
             window.electronAPI.onMessageBody((msg) => {
-                displayMessageBody(msg.msgNum, msg.body);
+                console.log("Renderer received message body:", msg.msgNum);
+                displayMessage(msg);
+
+                /* // Fetch the full message from DB (now updated)
+                window.electronAPI.getMessageByMsgNum(msg.msgNum).then(fullMsg => {
+                    displayMessage(fullMsg);
+                }); */
             });
 
             document.getElementById("yappModalDirButton").addEventListener("click", async () => {
