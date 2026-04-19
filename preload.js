@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     readMessage: (msgNum) => ipcRenderer.send("bbs:read-message", msgNum),
 
+    markMessageRead: (id) => ipcRenderer.invoke("markMessageRead", id),
+
     onMessageBody: (callback) => ipcRenderer.on("bbs:message-body", (event, msg) => callback(msg)),
 
     onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback()),

@@ -151,6 +151,20 @@
             padding: 0;
         }
 
+        .msg-row.unread {
+            font-weight: bold;
+            color: #000;
+        }
+
+        .msg-row.read {
+            font-weight: normal;
+            color: #777;
+        }
+
+        .msg-row.local {
+            color: rgb(25, 34, 160); /* cyan-ish for local messages */
+        }
+
         .msg-tab {
             padding: 6px 12px;
             cursor: pointer;
@@ -179,7 +193,7 @@
             cursor: pointer;
         }
 
-        .msgRow:hover {
+        .msgRow:hover, .msg-row:hover {
             background: #00ff22;
         }
 
@@ -526,9 +540,9 @@
             </div>
             <!-- RIGHT: Message Viewer -->
             <div id="msgView" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5);
-                white-space:pre; font-family:monospace; padding:8px;
+                font-family:monospace; padding: 8px;
                 border: 1px solid black; border-radius: 8px;">
-                <em>Select a message to view it</em><br>
+                Select a message to view it
             </div>
 
         </div>
@@ -761,6 +775,19 @@
                             return;
                         }
 
+                        // Mark as read if it was unread
+                        if (msg.read === 0) {
+                            await window.electronAPI.markMessageRead(id);
+                            msg.read = 1;
+                        }
+
+                        // Apply read/unread and local styling
+                        if (msg.read === 1) {row.classList.remove("unread");
+                                row.classList.add("read");}
+                            else {row.classList.remove("read"); row.classList.add("unread");}
+
+                        //if (msg.localOnly === 1) row.classList.add("local");
+
                         // If body is missing, request it from BBS
                         if (!msg.body || msg.body.trim() === "") {
                             await ensureBbsConnected();
@@ -802,7 +829,7 @@
 
                 // ⭐ Render
                 list.innerHTML = filtered.map(m => `
-                    <div class="msg-row" data-id="${m.id}" data-msgnum="${m.msgNum}">
+                    <div class="msg-row ${m.read === 1 ? 'read' : 'unread'}" data-id="${m.id}" data-msgnum="${m.msgNum}">
                         <pre>${formatListRow(m)}</pre>
                     </div>
                 `).join("");
@@ -1597,6 +1624,11 @@
 
                 try {
                     await sendBbsCommand(`R ${msgNum}`);
+
+                    await window.electronAPI.markMessageRead(msg.id);
+                    row.classList.remove("unread");
+                    row.classList.add("read");
+
                 } catch (err) {
                     appendCommand('error', 'Read message failed: ' + err.message);
                 }

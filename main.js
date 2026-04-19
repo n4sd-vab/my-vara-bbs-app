@@ -347,7 +347,7 @@ function upsertMessageListEntry(msg) {
 
 function saveMessageBody(msg) {
   db.prepare(`
-        UPDATE messages SET body=@body WHERE msgNum=@msgNum
+        UPDATE messages SET body=@body, localOnly=1 WHERE msgNum=@msgNum
     `).run(msg);
 }
 
@@ -1286,6 +1286,10 @@ ipcMain.handle("getMessages", () => {
 
 ipcMain.handle("getMessageById", (event, id) => {
   return db.prepare("SELECT * FROM messages WHERE id=?").get(id);
+});
+
+ipcMain.handle("markMessageRead", (event, id) => {
+    db.prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
 });
 
 ipcMain.on("bbs:read-message", (event, msgNum) => {
