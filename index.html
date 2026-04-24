@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>VARA BBS Client ver 1.0.9</title>
+    <title>VARA BBS Client ver 1.0.10</title>
     <style>
         body {
             background: #d4dde7;
@@ -162,7 +162,8 @@
         }
 
         .msg-row.local {
-            color: rgb(25, 34, 160); /* cyan-ish for local messages */
+            color: rgb(25, 34, 160);
+            /* cyan-ish for local messages */
         }
 
         .msg-tab {
@@ -175,6 +176,24 @@
         .msg-tab.active {
             background: #bbb;
             font-weight: bold;
+        }
+
+        .msg-context-menu {
+            position: absolute;
+            background: #f4f4f5;
+            border: 1px solid #555;
+            padding: 4px;
+            z-index: 9999;
+            width: 150px;
+        }
+
+        .msg-context-menu .menu-item {
+            padding: 6px 10px;
+            cursor: pointer;
+        }
+
+        .msg-context-menu .menu-item:hover {
+            background: #848199;
         }
 
         .msgLink {
@@ -193,7 +212,8 @@
             cursor: pointer;
         }
 
-        .msgRow:hover, .msg-row:hover {
+        .msgRow:hover,
+        .msg-row:hover {
             background: #00ff22;
         }
 
@@ -532,6 +552,10 @@
                     <div class="msg-tab" data-tab="bulletin">Bulletins</div>
                     <div class="msg-tab" data-tab="sent">Sent</div>
                     <div class="msg-tab" data-tab="outbox">Outbox</div>
+                    <div class="msg-tab" data-tab="saved">Archive</div>
+                    <div class="msg-tab" data-tab="user1">User1</div>
+                    <div class="msg-tab" data-tab="user2">User2</div>
+                    
                 </div>
 
                 <!-- ⭐ Message list content goes here -->
@@ -540,7 +564,7 @@
             </div>
             <!-- RIGHT: Message Viewer -->
             <div id="msgView" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5);
-                font-family:monospace; padding: 8px;
+                white-space:pre; font-family:monospace; padding: 8px;
                 border: 1px solid black; border-radius: 8px;">
                 Select a message to view it
             </div>
@@ -713,45 +737,51 @@
             }
 
             async function ensureBbsConnected() {
-                console.log("BBS Link Status:", bbsLinkUp, "BBS prompt ready:", bbsPromptReady);
-
+                console.log("ensureBbsConnected: entry", {
+                    bbsLinkUp,
+                    bbsPromptReady
+                });
                 // Already connected and ready
-                if (bbsLinkUp && bbsPromptReady) return true;
+                if (bbsLinkUp && bbsPromptReady) {
+                    console.log("ensureBbsConnected: already ready");
+                    return true;
+                }
 
+                console.log("ensureBbsConnected: reconnecting…");
                 showToast("Reconnecting to BBS…");
 
+                // Build CONNECT command
                 const connectCmd =
                     `CONNECT ${appSettings.myCall} ${appSettings.bbsCall}` +
                     (appSettings.digi1 ? ` VIA ${appSettings.digi1}` : "") +
                     (appSettings.digi2 ? ` ${appSettings.digi2}` : "");
 
-                // Reset state before reconnect
-                bbsPromptReady = false;
-                bbsLinkUp = false;
-
+                // Send CONNECT
                 await window.vara.sendCommand(connectCmd);
 
+                // Wait for RF link (command port)
+                await waitUntil(() => bbsLinkUp);
+
+                // Wait for BBS prompt (data port)
+                await waitUntil(() => bbsPromptReady);
+
+                console.log("ensureBbsConnected: ready");
+                return true;
+
+                console.log("ensureBbsConnected: exit", {
+                    bbsLinkUp,
+                    bbsPromptReady
+                });
+            }
+
+            function waitUntil(cond) {
                 return new Promise(resolve => {
-
-                    const listener = window.vara.onLog(({ msg }) => {
-
-                        const lines = msg.split(/\r\n|\r|\n/).filter(l => l.trim());
-
-                        for (const line of lines) {
-
-                            if (/^\s*CONNECTED\s/.test(line)) {
-                                bbsLinkUp = true;
-                            }
-
-                            if (bbsLinkUp && /^de\s+[A-Z0-9\-]+>/.test(line)) {
-                                window.vara.removeLogListener(listener);
-                                bbsPromptReady = true;
-                                showToast("Reconnected");
-                                resolve(true);
-                                return;
-                            }
+                    const check = setInterval(() => {
+                        if (cond()) {
+                            clearInterval(check);
+                            resolve(true);
                         }
-                    });
+                    }, 100);
                 });
             }
 
@@ -759,6 +789,8 @@
                 const rows = document.querySelectorAll(".msg-row");
 
                 rows.forEach(row => {
+
+                    // LEFT CLICK = open message
                     row.addEventListener("click", async () => {
                         // Remove previous selection highlight
                         rows.forEach(r => r.classList.remove("selected"));
@@ -775,32 +807,97 @@
                             return;
                         }
 
-                        // Mark as read if it was unread
+                        // Mark as read
                         if (msg.read === 0) {
                             await window.electronAPI.markMessageRead(id);
                             msg.read = 1;
                         }
 
-                        // Apply read/unread and local styling
-                        if (msg.read === 1) {row.classList.remove("unread");
-                                row.classList.add("read");}
-                            else {row.classList.remove("read"); row.classList.add("unread");}
+                        // Update styling
+                        row.classList.remove("unread");
+                        row.classList.add("read");
 
-                        //if (msg.localOnly === 1) row.classList.add("local");
-
-                        // If body is missing, request it from BBS
+                        // If body missing, fetch from BBS
                         if (!msg.body || msg.body.trim() === "") {
                             await ensureBbsConnected();
                             window.electronAPI.readMessage(msg.msgNum);
                         }
 
                         showToast(`Loading message #${msg.msgNum}…`);
+
                         // Render into right pane
                         const viewer = document.getElementById("msgView");
-                        viewer.innerHTML = `
-                            <pre>${msg.body || "(Fetching message...)"}</pre>
-                        `;
+                        viewer.innerHTML = `<pre>${msg.body || "(Fetching message...)"}</pre>`;
                     });
+
+                    // RIGHT CLICK = context menu
+                    row.addEventListener("contextmenu", async (ev) => {
+                        ev.preventDefault();
+
+                        const id = row.dataset.id;
+                        const msg = await window.electronAPI.getMessageById(id);
+
+                        showMessageContextMenu(row, msg);
+                    });
+                });
+            }
+
+            function showMessageContextMenu(row, msg) {
+                const menu = document.createElement("div");
+                menu.className = "msg-context-menu";
+
+                menu.innerHTML = `
+                    <div class="menu-item" data-action="open">Open</div>
+                    <div class="menu-item" data-action="reply">Reply</div>
+                    <div class="menu-item" data-action="archive">Move to Archive</div>
+                    <div class="menu-item" data-action="delete">Delete</div>
+                    <div class="menu-item" data-action="move">Move to...</div>
+                `;
+
+                document.body.appendChild(menu);
+
+                // Position near the row
+                const rect = row.getBoundingClientRect();
+                menu.style.left = rect.right + 5 + "px";
+                menu.style.top = rect.top + "px";
+
+                // Handle clicks
+                menu.addEventListener("click", async (e) => {
+                    const action = e.target.dataset.action;
+                    if (!action) return;
+
+                    if (action === "open") {
+                        row.click();
+                    }
+                    if (action === "reply") {
+                        window.electronAPI.replyToMessage(msg.msgNum);
+                    }
+
+                    if (action === "archive") {
+                        await window.electronAPI.markMessageSaved(msg.msgNum);
+                        row.classList.add("saved");
+                        row.remove();
+                    }
+
+                    if (action === "delete") {
+                        await window.electronAPI.deleteMessage(msg.msgNum);
+                        row.remove();
+                    }
+
+                    if (action === "move") {
+                        // Future: open category picker
+                        showToast("Move-to-category not implemented yet");
+                    }
+
+                    menu.remove();
+                });
+
+                // Close on outside click
+                document.addEventListener("click", function handler(ev) {
+                    if (!menu.contains(ev.target)) {
+                        menu.remove();
+                        document.removeEventListener("click", handler);
+                    }
                 });
             }
 
@@ -819,8 +916,11 @@
                 let filtered = messages.filter(m => {
                     if (currentMessageTab === "private") return m.type === "private" && !m.deleted;
                     if (currentMessageTab === "bulletin") return m.type === "bulletin" && !m.deleted;
-                    if (currentMessageTab === "sent") return m.type === "sent" && m.localOnly && !m.deleted;
-                    if (currentMessageTab === "outbox") return m.type === "outbox" && m.localOnly && !m.deleted;
+                    if (currentMessageTab === "sent") return m.type === "sent" && !m.deleted;
+                    if (currentMessageTab === "outbox") return m.type === "outbox" && !m.deleted;
+                    if (currentMessageTab === "saved") return m.saved === 1 && !m.deleted;
+                    if (currentMessageTab === "user1") return m.type === "user1" && !m.deleted;
+                    if (currentMessageTab === "user2") return m.type === "user2" && !m.deleted;
                     return false;
                 });
 
@@ -1412,7 +1512,7 @@
                 }
 
                 // RF link down
-                if (line.includes("DISCONNECTED")) {
+                if (type === "cmd" && line.includes("DISCONNECTED")) {
                     bbsLinkUp = false;
                     bbsPromptReady = false;
                     statusLink.textContent = "BBS Link Down";
@@ -1421,7 +1521,7 @@
                 }
 
                 // BPQ prompt
-                if (/^de\s+[A-Z0-9\-]+>/.test(line)) {
+                if (/^\s*de\s+[A-Z0-9\-]+>/i.test(line)) {
                     bbsPromptReady = true;
                     console.log("BBS prompt detected");
                 }

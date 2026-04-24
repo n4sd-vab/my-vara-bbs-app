@@ -5,7 +5,6 @@ contextBridge.exposeInMainWorld('vara', {
     disconnect: () => ipcRenderer.invoke('vara-disconnect'),
     sendCommand: (line) => ipcRenderer.invoke('vara-send-command', line),
     sendData: (text) => ipcRenderer.invoke('vara-send-data', text),
-    //sendToBbs: (cmd) => ipcRenderer.send("bbs-send", cmd),
     onLog: (callback) => {
         const listener = (_event, data) => callback(data);
         ipcRenderer.on("log", listener);
@@ -36,6 +35,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getMessageById: (id) => ipcRenderer.invoke("getMessageById", id),
 
     sendToBbs: (cmd) => ipcRenderer.send("send-to-bbs", cmd),
+
+    deleteMessage: (id) => ipcRenderer.invoke("deleteMessage", id),
+
+    onMessageDeleted: (callback) =>
+        ipcRenderer.on("message-deleted", (_e, msgNum) => callback(msgNum)),
+
+    markMessageSaved: (id) => ipcRenderer.invoke("markMessageSaved", id),
+    
+    onMessageSaved: (callback) =>
+        ipcRenderer.on("message-saved", (_e, msgNum) => callback(msgNum)),
 
     onReplyToSender: (callback) =>
         ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),

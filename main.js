@@ -71,6 +71,7 @@ let settings = loadSettings();
 
 let mainWindow;
 let cmdSocket = null;
+let cmdBuffer = "";
 let dataSocket = null;
 let dataBuffer = "";
 let inYapp = false;   // global YAPP mode flag
@@ -81,6 +82,8 @@ let fileList = [];
 let inYappSend = false;
 let yappSend = null; // holds the sender state machine instance
 
+// Persistent buffer for WP mode
+let wpBuffer = "";
 let whitePagesMode = false;
 let whitePagesResults = [];
 
@@ -95,7 +98,6 @@ let currentReadMsgNum = null;
 let currentReadBody = [];
 let readBuffer = "";
 let footerSeen = false;
-
 
 
 const menuTemplate = [
@@ -222,8 +224,9 @@ function initializeDatabase() {
           subject TEXT,
           body TEXT,
           read INTEGER DEFAULT 0,
-          localOnly INTEGER DEFAULT 0,
-          deleted INTEGER DEFAULT 0
+          saved INTEGER DEFAULT 0,
+          deleted INTEGER DEFAULT 0,
+          category TEXT
 );
 
         CREATE TABLE IF NOT EXISTS address_book (
@@ -333,7 +336,7 @@ function parseListLine(line) {
 
 function upsertMessageListEntry(msg) {
   const stmt = db.prepare(`
-        INSERT INTO messages (msgNum, date, typeCode,type, size, recipient, at, sender, subject, read, localOnly, deleted)
+        INSERT INTO messages (msgNum, date, typeCode,type, size, recipient, at, sender, subject, read, saved, deleted)
         VALUES (@msgNum, @date, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 0, 0, 0)
         ON CONFLICT(msgNum) DO UPDATE SET
             date=@date,
@@ -347,7 +350,7 @@ function upsertMessageListEntry(msg) {
 
 function saveMessageBody(msg) {
   db.prepare(`
-        UPDATE messages SET body=@body, localOnly=1 WHERE msgNum=@msgNum
+        UPDATE messages SET body=@body WHERE msgNum=@msgNum
     `).run(msg);
 }
 
@@ -417,25 +420,63 @@ function sendRawBytes(buffer) {
 function finishReadMode() {
   if (!inReadMode) return;  // Prevent double-ending
 
-    inReadMode = false;
+  inReadMode = false;
 
-    const body = currentReadBody.join("\n");
-    console.log("READ MODE END for message", currentReadMsgNum);
-    console.log("READ MODE: accumulated body length =", currentReadBody.length);
+  const body = currentReadBody.join("\n");
+  console.log("READ MODE END for message", currentReadMsgNum);
+  console.log("READ MODE: accumulated body length =", currentReadBody.length);
 
-    saveMessageBody({
-        msgNum: currentReadMsgNum,
-        body
-    });
+  saveMessageBody({
+    msgNum: currentReadMsgNum,
+    body
+  });
 
-    mainWindow.webContents.send("bbs:message-body", {
-        msgNum: currentReadMsgNum,
-        body
-    });
+  mainWindow.webContents.send("bbs:message-body", {
+    msgNum: currentReadMsgNum,
+    body
+  });
 
-    currentReadBody = [];
-    readBuffer = "";
+  currentReadBody = [];
+  readBuffer = "";
 }
+
+function deleteMessage(msgNum) {
+  try {
+    // Ensure msgNum is a number
+    const numMsg = parseInt(msgNum, 10);
+    
+    if (isNaN(numMsg)) {
+      console.error("deleteMessage: Invalid msgNum - not a number:", msgNum);
+      return;
+    }
+    
+    const result = db.prepare("UPDATE messages SET deleted = 1 WHERE msgNum = ?").run(numMsg);
+    
+    console.log("Message delete attempt - msgNum:", numMsg, "Changes made:", result.changes);
+    
+    if (result.changes === 0) {
+      console.warn("deleteMessage: No messages found with msgNum =", numMsg);
+    }
+    
+    mainWindow.webContents.send("message-deleted", numMsg);
+  } catch (err) {
+    console.error("deleteMessage error:", err);
+  }
+}
+
+ipcMain.handle("deleteMessage", (_event, msgNum) => {
+  deleteMessage(msgNum);
+});
+
+function markMessageSaved(msgNum) {
+  db.prepare("UPDATE messages SET saved = 1 WHERE msgNum = ?").run(msgNum);
+  console.log("Message marked as saved in DB:", msgNum);
+  mainWindow.webContents.send("message-saved", msgNum);
+}
+
+ipcMain.handle("markMessageSaved", (_event, msgNum) => {
+  markMessageSaved(msgNum);
+});
 
 function handleFileListText(text) {
   console.log("YAPP FILELIST: Received text chunk:", JSON.stringify(text));
@@ -575,11 +616,39 @@ ipcMain.handle('vara-connect', async () => {
 
     cmdSocket.on('data', (data) => {
       logToRenderer('cmd', data.toString());
+      cmdBuffer += data.toString();
 
-      //Check for BUFFER messages during YAPP send
+      const parts = cmdBuffer.split(/\r\n|\r|\n/);
+
+      // Process all complete lines
+      for (let i = 0; i < parts.length - 1; i++) {
+        const trimmed = parts[i].trim();
+        if (!trimmed) continue;
+
+        if (/^CONNECTED\b/i.test(trimmed)) {
+          bbsLinkUp = true;
+          console.log("CMD: Link up");
+        }
+
+        if (/^DISCONNECTED\b/i.test(trimmed)) {
+          bbsLinkUp = false;
+          bbsPromptReady = false;
+          console.log("CMD: Link down");
+        }
+
+        if (/^WRONG\b/i.test(trimmed)) {
+          console.log("CMD: WRONG (modem error)");
+        }
+
+        // YAPP BUFFER logic stays below
+      }
+
+      // Save incomplete tail
+      cmdBuffer = parts[parts.length - 1];
+
+      // YAPP BUFFER logic
       if (yappSend && yappSend.phase === "sendingData") {
         const line = data.toString("utf8");
-
         if (line.startsWith("BUFFER")) {
           const parts = line.split(" ");
           const remaining = parseInt(parts[1], 10);
@@ -615,8 +684,15 @@ ipcMain.handle('vara-connect', async () => {
     // ---------------- VARA DATA SOCKET ----------------
     dataSocket.on('data', (data) => {
 
-      // Persistent buffer for WP mode
-      let wpBuffer = "";
+      // Detect BBS prompt
+      const lines = data.toString().split('\r');
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
+          bbsPromptReady = true;
+          console.log("DATA: BBS prompt detected");
+        }
+      }
 
       // --------------------------
       // Check for WhitePages lines
@@ -663,7 +739,7 @@ ipcMain.handle('vara-connect', async () => {
         return;
       }
 
-      console.log("RAW DATA:", data);
+      //console.log("RAW DATA:", data);
       //console.log("HEX:", data.toString('hex'));
       console.log("ascii:", data.toString('ascii'));
       //console.log("BYTES:", [...data]);
@@ -779,7 +855,7 @@ ipcMain.handle('vara-connect', async () => {
             if (!line) continue;
 
             // End of LIST output
-            if (line === ">") {
+            if (/^\s*de\s+[A-Z0-9\-]+>/i.test(line)) {
               messageListMode = "local";
               listBuffer = "";
               mainWindow.webContents.send("bbs:list-end");
@@ -1289,7 +1365,7 @@ ipcMain.handle("getMessageById", (event, id) => {
 });
 
 ipcMain.handle("markMessageRead", (event, id) => {
-    db.prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
+  db.prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
 });
 
 ipcMain.on("bbs:read-message", (event, msgNum) => {
