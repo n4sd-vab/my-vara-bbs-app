@@ -18,7 +18,10 @@ contextBridge.exposeInMainWorld('vara', {
 
 contextBridge.exposeInMainWorld('settings', {
   get: () => ipcRenderer.invoke('settings-get'),
-  set: (data) => ipcRenderer.invoke('settings-set', data)
+  set: (data) => {
+    ipcRenderer.invoke('settings-set', data);
+    ipcRenderer.send('settings-updated', data);
+  }
 });
 
 
@@ -46,8 +49,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onMessageSaved: (callback) =>
         ipcRenderer.on("message-saved", (_e, msgNum) => callback(msgNum)),
 
-    onReplyToSender: (callback) =>
-        ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),
+    sendBbsState: (state) => ipcRenderer.send("bbs-state", state),
+
+    sendOutbox: () => ipcRenderer.invoke("sendOutbox"),
+
+    // onReplyToSender: (callback) =>
+    //    ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),
+
+    saveOutboxMessage: (message) => ipcRenderer.invoke("saveOutboxMessage", message),
+
+    sendReceive: () => ipcRenderer.send("sendReceive"),
+
+    replyToMessage: (msgNum) => ipcRenderer.invoke("replyToMessage", msgNum),
     
     onOpenAddressBookAdd: (callback) =>
         ipcRenderer.on("open-address-book-add", () => callback()),

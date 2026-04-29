@@ -146,19 +146,30 @@
             /* only this scrolls */
         }
 
+        .msg-header pre {
+            margin: 0;
+            padding: 4px 8px;
+            font-weight: bold;
+            background: #333;
+            color: #eee;
+            border-bottom: 1px solid #555;
+        }
+
         .msg-row pre {
             margin: 0;
             padding: 0;
         }
 
-        .msg-row.unread {
-            font-weight: bold;
+        .msg-row[data-read="0"] pre {
             color: #000;
+            /* unread bright */
+            font-weight: bold;
         }
 
-        .msg-row.read {
+        .msg-row[data-read="1"] pre {
+            color: #888;
+            /* read dim */
             font-weight: normal;
-            color: #777;
         }
 
         .msg-row.local {
@@ -225,6 +236,32 @@
 
         .msgRow.selected {
             background: #ccc;
+        }
+
+        .msg-filters {
+            display: flex;
+            gap: 6px;
+            padding: 4px 8px;
+            background: #222;
+            border-bottom: 1px solid #444;
+        }
+
+        .msg-filters button {
+            padding: 2px 8px;
+            background: #444;
+            color: #eee;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .msg-filters button:hover {
+            background: #666;
+        }
+
+        .msg-filters button.active {
+            background: #888;
+            font-weight: bold;
         }
 
         span.fixed-width {
@@ -515,6 +552,7 @@
             <button id="listBullBtn">List Bulletins</button>
             <button id="listWxBtn">List Weather</button> |
             <button id="composeMsgBtn">Compose Message</button>
+            <button id="sendReceiveBtn" class="main-btn" title="Send Outbox Messages">Send / Receive</button>
         </div>
         <div id="statusBar" style="
         display: flex;
@@ -555,10 +593,20 @@
                     <div class="msg-tab" data-tab="saved">Archive</div>
                     <div class="msg-tab" data-tab="user1">User1</div>
                     <div class="msg-tab" data-tab="user2">User2</div>
-                    
+
                 </div>
 
                 <!-- ⭐ Message list content goes here -->
+<!--                 <div id="msg-filters" class="msg-filters">
+                    <button data-filter="all">All</button>
+                    <button data-filter="unread">Unread</button>
+                    <button data-filter="read">Read</button>
+                    <button data-filter="local">Local</button>
+                    <button data-filter="remote">Remote</button>
+                </div> -->
+                <div id="msg-header" class="msg-header">
+                    <pre>Msg#   Date  T  Size   From    To      @BBS       Subject</pre>
+                </div>
                 <div id="messageList" style="padding:8px;"></div>
 
             </div>
@@ -599,6 +647,8 @@
             const composeTo = document.getElementById('composeTo');
             const composeSubject = document.getElementById('composeSubject');
             const composeType = document.getElementById('composeType');
+            const composeBody = document.getElementById('composeBody');
+
 
             const addressBookModal = document.getElementById('addressBookModal');
             const addressBookCancelBtn = document.getElementById('addressBookCancelBtn');
@@ -641,6 +691,7 @@
             const listBullBtn = document.getElementById('listBullBtn');
             const listWxBtn = document.getElementById('listWxBtn');
             const listNewBtn = document.getElementById('listNewBtn');
+            const sendReceiveBtn = document.getElementById('sendReceiveBtn');
             const commandConsole = document.getElementById('commandConsole');
             const commandInput = document.getElementById('commandInput');
             const rxArea = document.getElementById('rxArea');
@@ -657,17 +708,18 @@
             const disconnectBtn = document.getElementById('disconnectBtn');
 
             const composeSendBtn = document.getElementById('composeSendBtn');
+            const composeSaveBtn = document.getElementById('composeSaveBtn');
 
 
             console.log("Loaded settings:", appSettings);
 
 
-            window.electronAPI.onReplyToSender(({ sender, subject }) => {
-                composeModal.style.display = "flex";
-                composeTo.value = sender;
-                composeSubject.value = "Re: " + subject;
-                composeType.value = "P";
-            });
+            /*             window.electronAPI.onReplyToSender(({ sender, subject }) => {
+                            composeModal.style.display = "flex";
+                            composeTo.value = sender;
+                            composeSubject.value = "Re: " + subject;
+                            composeType.value = "P";
+                        }); */
 
             document.getElementById("varaConsoleSection").style.display =
                 appSettings.showVaraConsole ? "block" : "none";
@@ -744,6 +796,8 @@
                 // Already connected and ready
                 if (bbsLinkUp && bbsPromptReady) {
                     console.log("ensureBbsConnected: already ready");
+                    window.electronAPI.sendBbsState({ bbsLinkUp: true });
+                    window.electronAPI.sendBbsState({ bbsPromptReady: true });
                     return true;
                 }
 
@@ -869,8 +923,11 @@
                     if (action === "open") {
                         row.click();
                     }
+
                     if (action === "reply") {
-                        window.electronAPI.replyToMessage(msg.msgNum);
+                        window.electronAPI.replyToMessage(msg.msgNum).then(msg => {
+                            openReplyModal(msg);
+                        });
                     }
 
                     if (action === "archive") {
@@ -916,8 +973,8 @@
                 let filtered = messages.filter(m => {
                     if (currentMessageTab === "private") return m.type === "private" && !m.deleted;
                     if (currentMessageTab === "bulletin") return m.type === "bulletin" && !m.deleted;
-                    if (currentMessageTab === "sent") return m.type === "sent" && !m.deleted;
-                    if (currentMessageTab === "outbox") return m.type === "outbox" && !m.deleted;
+                    if (currentMessageTab === "sent") return m.sent === 1 && !m.deleted;
+                    if (currentMessageTab === "outbox") return m.outbox === 1 && !m.deleted;
                     if (currentMessageTab === "saved") return m.saved === 1 && !m.deleted;
                     if (currentMessageTab === "user1") return m.type === "user1" && !m.deleted;
                     if (currentMessageTab === "user2") return m.type === "user2" && !m.deleted;
@@ -926,10 +983,36 @@
 
                 // ⭐ Sort newest first (optional)
                 filtered.sort((a, b) => (b.msgNum || 0) - (a.msgNum || 0));
+                /* filtered.sort((a, b) => {
+                    if (sortColumn === "date") {
+                        return sortDirection === "asc"
+                            ? a.date.localeCompare(b.date)
+                            : b.date.localeCompare(a.date);
+                    }
+                    if (sortColumn === "from") {
+                        return sortDirection === "asc"
+                            ? a.from.localeCompare(b.from)
+                            : b.from.localeCompare(a.from);
+                    }
+                    // add more columns as needed
+                }); */
+
+
+
+                // NEW: apply message filters
+                filtered = filtered.filter(m => {
+                    switch (currentFilter) {
+                        case "unread": return m.read === 0;
+                        case "read": return m.read === 1;
+                        case "local": return m.localOnly === 1;
+                        case "remote": return m.localOnly === 0;
+                        default: return true;
+                    }
+                });
 
                 // ⭐ Render
                 list.innerHTML = filtered.map(m => `
-                    <div class="msg-row ${m.read === 1 ? 'read' : 'unread'}" data-id="${m.id}" data-msgnum="${m.msgNum}">
+                    <div class="msg-row" data-read="${m.read}" data-id="${m.id}" data-msgnum="${m.msgNum}">
                         <pre>${formatListRow(m)}</pre>
                     </div>
                 `).join("");
@@ -950,6 +1033,39 @@
                     pad(m.sender, 7),
                     m.subject
                 ].join(" ");
+            }
+
+            function openReplyModal(msg) {
+                const modal = document.getElementById("composeModal");
+                modal.style.display = "flex";
+
+                // Fill fields
+                document.getElementById("composeTo").value = msg.sender;
+                document.getElementById("composeSubject").value = "Re: " + msg.subject;
+                document.getElementById("composeType").value = "P";
+
+                const bodyField = document.getElementById("composeBody");
+                const includeOriginal = document.getElementById("includeOriginalCheckbox");
+
+                // Clear previous content
+                bodyField.value = "";
+                includeOriginal.checked = false;
+
+                // Prepare quoted original
+                const quoted = msg.body
+                    ? "\n\n--- Original Message ---\n" +
+                    msg.body.split("\n").map(l => "> " + l).join("\n")
+                    : "";
+
+                // When checkbox toggles, update body
+                includeOriginal.onchange = () => {
+                    if (includeOriginal.checked) {
+                        bodyField.value += quoted;
+                    } else {
+                        // Remove quoted text if user unchecks
+                        bodyField.value = bodyField.value.replace(quoted, "");
+                    }
+                };
             }
 
             async function sendBbsCommand(cmd) {
@@ -976,6 +1092,7 @@
                 listWxBtn.disabled = !connected;
                 listNewBtn.disabled = !connected;
                 composeMsgBtn.disabled = !connected;
+                sendReceiveBtn.disabled = !connected;
 
                 statusVara.textContent = connected ? "Connected" : "Disconnected";
                 statusVara.style.color = connected ? "#0f0" : "#f33";
@@ -999,6 +1116,38 @@
                     <pre>${msg.body}</pre>
                 `;
             }
+
+            async function saveOutboxMessage(message) {
+                console.log("Saving outbox message to DB:", message);
+                try {
+                    await window.electronAPI.saveOutboxMessage(message);
+                } catch (err) {
+                    console.error("Failed to save outbox message:", err);
+                    throw err;
+                }
+
+            }
+
+            /* async function uploadOutboxMessages() {
+                let outboxMessages = [];
+                try {
+                    outboxMessages = await window.electronAPI.getOutboxMessages();
+                } catch (err) {
+                    console.error("Failed to load outbox messages:", err);
+                    return;
+                }
+
+                for (const msg of outboxMessages) {
+                    try {
+                        await window.electronAPI.uploadOutboxMessage(msg);
+                        await window.electronAPI.markOutboxMessageSent(msg.id);
+                        console.log(`Message ${msg.id} uploaded and marked as sent.`);
+                    } catch (err) {
+                        console.error(`Failed to upload message ${msg.id}:`, err);
+                    }
+                }
+            } */
+
 
             // Attach handlers to Edit/Delete buttons in address book view
             function attachAddressBookRowHandlers() {
@@ -1083,6 +1232,8 @@
                 }, 2500);
             }
 
+
+
             // Listen for VARA console toggle from main process
             window.electronAPI.onToggleVaraConsole((visible) => {
                 const section = document.getElementById("varaConsoleSection");
@@ -1093,6 +1244,32 @@
                 row.addEventListener("click", () => {
                     const msgNum = row.dataset.msgnum;
                     requestMessageBody(msgNum);
+                });
+            });
+
+            document.getElementById("msg-header").addEventListener("click", () => {
+                // Example: toggle date sort
+                if (sortDirection === "asc") sortDirection = "desc";
+                else sortDirection = "asc";
+
+                renderMessageList();
+            });
+
+            let currentFilter = "all";
+
+            let sortColumn = "date";
+            let sortDirection = "asc"; // or "desc"
+
+            document.querySelectorAll("#msg-filters button").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    currentFilter = btn.dataset.filter;
+
+                    // highlight active button
+                    document.querySelectorAll("#msg-filters button").forEach(b =>
+                        b.classList.toggle("active", b === btn)
+                    );
+
+                    renderMessageList();  // re-render with filter applied
                 });
             });
 
@@ -1509,6 +1686,7 @@
                     statusLink.textContent = "BBS Link Up";
                     statusLink.style.color = "#0f0";
                     console.log("BBS link is up");
+                    window.electronAPI.sendBbsState({ bbsLinkUp: true });
                 }
 
                 // RF link down
@@ -1518,11 +1696,13 @@
                     statusLink.textContent = "BBS Link Down";
                     statusLink.style.color = "#f33";
                     console.log("BBS link is down");
+                    window.electronAPI.sendBbsState({ bbsLinkUp: false, bbsPromptReady: false });
                 }
 
                 // BPQ prompt
                 if (/^\s*de\s+[A-Z0-9\-]+>/i.test(line)) {
                     bbsPromptReady = true;
+                    window.electronAPI.sendBbsState({ bbsPromptReady: true });
                     console.log("BBS prompt detected");
                 }
 
@@ -1704,6 +1884,10 @@
                 }
             });
 
+            document.getElementById("sendReceiveBtn").addEventListener("click", () => {
+                window.electronAPI.sendOutbox();
+            });
+
             // Message click handler (event delegation)
             document.addEventListener('click', async (e) => {
                 const row = e.target.closest('.msgRow');
@@ -1856,7 +2040,6 @@
                 try {
                     await sendBbsCommand(msg);
                     composeModal.style.display = "none";
-
                     composeTo.value = "";
                     composeSubject.value = "";
                     composeBody.value = "";
@@ -1866,6 +2049,30 @@
                 }
             });
 
+            composeSaveBtn.addEventListener('click', async () => {
+                const msgNum = Date.now(); // temporary unique ID
+                const recipient = document.getElementById('composeTo').value.trim();
+                const subject = document.getElementById('composeSubject').value.trim();
+                const type = document.getElementById('composeType').value;
+                const body = document.getElementById('composeBody').value;
+                const sender = appSettings.myCall;
+
+                if (!recipient || !subject || !body) {
+                    appendCommand('error', 'All fields are required');
+                    return;
+                }
+                saveOutboxMessage({
+                    msgNum,
+                    type,
+                    recipient,
+                    sender,
+                    subject,
+                    body
+                });
+                composeModal.style.display = "none";
+            });
+
+
             document.querySelectorAll('.msgRow').forEach(r => r.classList.remove('selected'));
             // row.classList.add('selected');
             // Is this needed? Maybe not, since we clear the message view when clicking a message, 
@@ -1874,12 +2081,6 @@
             composeSubject.value = "";
             composeBody.value = "";
             composeType.value = "P";
-
-            /* composeModal.addEventListener('click', (e) => {
-                if (e.target === composeModal) {
-                    composeModal.style.display = "none";
-                }
-            }); */
 
 
         });
@@ -1905,10 +2106,18 @@
             </select><br>
 
             <label>Message:</label><br>
-            <textarea id="composeBody" rows="8" class="modal-input"></textarea>
+
+            <label>
+                <input type="checkbox" id="includeOriginalCheckbox">
+                Include original message
+            </label>
+            <br>
+
+            <textarea id="composeBody" rows="12" class="modal-input"></textarea>
 
             <div style="text-align:right;">
                 <button id="composeCancelBtn" class="modal-btn cancel">Cancel</button>
+                <button id="composeSaveBtn" class="modal-btn save">Save to Outbox</button>
                 <button id="composeSendBtn" class="modal-btn send">Send</button>
             </div>
         </div>

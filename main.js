@@ -68,6 +68,13 @@ function saveSettings(settings) {
 }
 
 let settings = loadSettings();
+let appSettings = loadSettings();  // initial load
+
+ipcMain.on("settings-updated", (_event, newSettings) => {
+  appSettings = newSettings;
+  console.log("Main updated settings:", appSettings);
+});
+
 
 let mainWindow;
 let cmdSocket = null;
@@ -81,6 +88,9 @@ let fileList = [];
 
 let inYappSend = false;
 let yappSend = null; // holds the sender state machine instance
+
+let bbsLinkUp = false;
+let bbsPromptReady = false;
 
 // Persistent buffer for WP mode
 let wpBuffer = "";
@@ -226,8 +236,10 @@ function initializeDatabase() {
           read INTEGER DEFAULT 0,
           saved INTEGER DEFAULT 0,
           deleted INTEGER DEFAULT 0,
+          outbox INTEGER DEFAULT 0,
+          sent INTEGER DEFAULT 0,
           category TEXT
-);
+        );
 
         CREATE TABLE IF NOT EXISTS address_book (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -251,6 +263,33 @@ function initializeDatabase() {
         CREATE INDEX IF NOT EXISTS idx_address_callsign ON address_book(callsign);
 
     `);
+}
+
+let lineWaiters = [];
+
+function waitForLine(regex, timeout = 15000) {
+  return new Promise((resolve, reject) => {
+    const waiter = { regex, resolve };
+    lineWaiters.push(waiter);
+
+    setTimeout(() => {
+      const idx = lineWaiters.indexOf(waiter);
+      if (idx !== -1) lineWaiters.splice(idx, 1);
+      reject(new Error(`Timeout waiting for: ${regex}`));
+    }, timeout);
+  });
+}
+
+function notifyLineListeners(line) {
+  console.log("notifyLineListeners GOT:", JSON.stringify(line));
+  for (let i = lineWaiters.length - 1; i >= 0; i--) {
+    const waiter = lineWaiters[i];
+    console.log("Testing waiter against line:", waiter.regex, JSON.stringify(line));
+    if (waiter.regex.test(line)) {
+      waiter.resolve(line);
+      lineWaiters.splice(i, 1);
+    }
+  }
 }
 
 function parseWhitePagesLine(line) {
@@ -354,6 +393,26 @@ function saveMessageBody(msg) {
     `).run(msg);
 }
 
+function saveOutboxMessage(msg) {
+  const date = new Date();
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    timeZone: 'UTC'
+  });
+  // Format and replace space with hyphen
+  const formattedDate = formatter.format(date).replace(' ', '-');
+
+  const typeCode = msg.type;
+  const type = msg.type === "P" ? "private" : "bulletin";
+  db.prepare(`
+        INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, outbox, sent)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+    `).run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
+
+  return true;
+}
+
 app.whenReady().then(() => {
   createWindow();
 
@@ -406,6 +465,25 @@ function formatBbsLine(line) {
     `;
 }
 
+function sendConnectCommand() {
+  if (!cmdSocket) {
+    console.error("sendConnectCommand: cmdSocket is not connected");
+    return;
+  }
+
+  const myCall = appSettings.myCall || settings.myCall;
+  const bbsCall = appSettings.bbsCall || settings.bbsCall;
+  const digi1 = appSettings.digi1 || settings.digi1;
+  const digi2 = appSettings.digi2 || settings.digi2;
+
+  let cmd = `CONNECT ${myCall} ${bbsCall}`;
+  if (digi1) cmd += ` VIA ${digi1}`;
+  if (digi2) cmd += ` ${digi2}`;
+
+  console.log("MAIN: Sending CONNECT:", cmd);
+  cmdSocket.write(cmd + "\r");
+}
+
 function sendRawBytes(buffer) {
   if (!Buffer.isBuffer(buffer)) {
     buffer = Buffer.from(buffer);
@@ -444,20 +522,20 @@ function deleteMessage(msgNum) {
   try {
     // Ensure msgNum is a number
     const numMsg = parseInt(msgNum, 10);
-    
+
     if (isNaN(numMsg)) {
       console.error("deleteMessage: Invalid msgNum - not a number:", msgNum);
       return;
     }
-    
+
     const result = db.prepare("UPDATE messages SET deleted = 1 WHERE msgNum = ?").run(numMsg);
-    
+
     console.log("Message delete attempt - msgNum:", numMsg, "Changes made:", result.changes);
-    
+
     if (result.changes === 0) {
       console.warn("deleteMessage: No messages found with msgNum =", numMsg);
     }
-    
+
     mainWindow.webContents.send("message-deleted", numMsg);
   } catch (err) {
     console.error("deleteMessage error:", err);
@@ -477,6 +555,139 @@ function markMessageSaved(msgNum) {
 ipcMain.handle("markMessageSaved", (_event, msgNum) => {
   markMessageSaved(msgNum);
 });
+
+
+ipcMain.on("bbs-state", (_event, state) => {
+  if (state.bbsLinkUp !== undefined) bbsLinkUp = state.bbsLinkUp;
+  if (state.bbsPromptReady !== undefined) bbsPromptReady = state.bbsPromptReady;
+
+  console.log("MAIN BBS STATE:", { bbsLinkUp, bbsPromptReady });
+});
+
+// Function to ensure BBS connection before sending messages, 
+// with timeout and error handling
+async function ensureBbsConnected() {
+  if (bbsLinkUp && bbsPromptReady) return true;
+
+  // Ask VARA/BPQ to connect
+  sendConnectCommand();
+
+  // Wait up to 15 seconds for renderer to report link + prompt
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (bbsLinkUp && bbsPromptReady) {
+        clearInterval(timer);
+        resolve(true);
+      }
+      if (Date.now() - start > 15000) {
+        clearInterval(timer);
+        reject(new Error("Timeout waiting for BBS connect"));
+      }
+    }, 200);
+  });
+}
+
+ipcMain.handle("sendOutbox", async () => {
+  try {
+    await uploadOutboxMessages();
+    return true;
+  } catch (err) {
+    console.error("Send failed:", err);
+    throw err;
+  }
+});
+
+async function uploadOutboxMessages() {
+  const outbox = db.prepare("SELECT * FROM messages WHERE outbox = 1 AND deleted = 0 AND sent = 0").all();
+
+  if (outbox.length === 0) {
+    mainWindow.webContents.send("toast", "Outbox is empty");
+    return;
+  }
+
+  for (const msg of outbox) {
+    await uploadSingleMessage(msg);
+  }
+
+  mainWindow.webContents.send("toast", "Outbox messages sent");
+}
+
+function uploadSingleMessage(msg) {
+  return new Promise(async (resolve, reject) => {
+
+    try {
+      await ensureBbsConnected();
+
+      // Register waiters BEFORE sending SP
+      const wTitle = waitForLine(/Enter Title/i);
+      const wAddress = waitForLine(/Address/i);
+
+      // Send SP
+      dataSocket.write(`SP ${msg.recipient}\r`);
+
+      // Wait for whichever comes first
+      await Promise.race([wTitle, wAddress]);
+
+      // Now wait specifically for Enter Title
+      await wTitle;
+
+      // Send title
+      dataSocket.write(`${msg.subject}\r`);
+
+      // Wait for Enter Message Text
+      await waitForLine(/Enter Message Text/i);
+
+      // Send body
+      for (const line of msg.body.split(/\r?\n/)) {
+        dataSocket.write(line + "\r");
+      }
+
+      // End message
+      dataSocket.write("/ex\r");
+
+      // Wait for Message: ### Size: ###
+      const result = await waitForLine(/Message:\s+(\d+).*Size:\s+(\d+)/i);
+
+      const match = result.match(/Message:\s+(\d+).*Size:\s+(\d+)/i);
+      const msgNum = match[1];
+      const size = match[2];
+
+      // 7. Update DB
+      db.prepare(`
+                UPDATE messages
+                SET msgNum = ?, size = ?, sent = 1, outbox = 0, date = ?
+                WHERE id = ?
+            `).run(msgNum, size, new Date().toISOString().slice(0, 10), msg.id);
+
+      resolve();
+
+    } catch (err) {
+      console.error("Upload failed:", err);
+      reject(err);
+    }
+  });
+}
+
+/* function waitForLine(regex) {
+  return new Promise((resolve, reject) => {
+    const handler = (line) => {
+      if (regex.test(line)) {
+        dataSocket.off("line", handler);
+        resolve(line);
+      }
+    };
+
+    dataSocket.on("line", handler);
+
+    // Optional timeout
+    setTimeout(() => {
+      dataSocket.off("line", handler);
+      reject(new Error("Timeout waiting for: " + regex));
+    }, 15000);
+  });
+}  */
+
 
 function handleFileListText(text) {
   console.log("YAPP FILELIST: Received text chunk:", JSON.stringify(text));
@@ -958,6 +1169,8 @@ ipcMain.handle('vara-connect', async () => {
         for (let i = 0; i < parts.length - 1; i++) {
           const line = parts[i];
           logToRenderer('data', line);
+          notifyLineListeners(line);
+          console.log("DATA LINE:", JSON.stringify(line));
         }
 
         // Save the incomplete tail (if any)
@@ -978,7 +1191,6 @@ ipcMain.handle('vara-connect', async () => {
     });
   });
 });
-
 
 
 //----------------------YAPP SEND LOGIC----------------------//
@@ -1388,7 +1600,7 @@ ipcMain.on("send-to-bbs", (event, cmd) => {
   if (dataSocket) dataSocket.write(cmd + "\r");
 });
 
-ipcMain.on("show-message-context-menu", (event, data) => {
+/* ipcMain.on("show-message-context-menu", (event, data) => {
   const menu = new Menu();
 
   menu.append(new MenuItem({
@@ -1399,7 +1611,31 @@ ipcMain.on("show-message-context-menu", (event, data) => {
   }));
 
   menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
+}); */
+
+ipcMain.handle("sendReceive", async () => {
+  await ensureVaraConnected();
+  await ensureBbsConnected();
+  await uploadOutboxMessages();
+  await requestMessageList();
+  // main.js already handles LIST/READ
+  return true;
 });
+
+
+ipcMain.handle("replyToMessage", (_event, msgNum) => {
+  const msg = db.prepare("SELECT * FROM messages WHERE msgNum = ?").get(msgNum);
+  return msg;
+});
+
+
+ipcMain.handle("saveOutboxMessage", (_event, message) => {
+  return saveOutboxMessage(message);
+});
+
+
+
+
 
 ipcMain.on('whitepages-start', () => {
   whitePagesMode = true;
