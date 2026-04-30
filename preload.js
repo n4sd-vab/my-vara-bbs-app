@@ -53,6 +53,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     sendOutbox: () => ipcRenderer.invoke("sendOutbox"),
 
+
+    receiveMessages: () => ipcRenderer.invoke('receive-messages'),
+
     // onReplyToSender: (callback) =>
     //    ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),
 

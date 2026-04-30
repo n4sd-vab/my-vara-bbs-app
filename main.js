@@ -85,6 +85,7 @@ let inYapp = false;   // global YAPP mode flag
 let yappReceiver = null;  // will hold YappReceiver instance during YAPP transfers
 let inFileList = false;  // flag to indicate we're currently receiving a file list from the BBS
 let fileList = [];
+let endOfFileList = false;  // flag to detect end of file list when BBS prompt is not standard
 
 let inYappSend = false;
 let yappSend = null; // holds the sender state machine instance
@@ -108,7 +109,7 @@ let currentReadMsgNum = null;
 let currentReadBody = [];
 let readBuffer = "";
 let footerSeen = false;
-
+let endOfReadMode = false;
 
 const menuTemplate = [
   {
@@ -238,7 +239,8 @@ function initializeDatabase() {
           deleted INTEGER DEFAULT 0,
           outbox INTEGER DEFAULT 0,
           sent INTEGER DEFAULT 0,
-          category TEXT
+          category TEXT,
+          seenInLM INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS address_book (
@@ -291,6 +293,7 @@ function notifyLineListeners(line) {
     }
   }
 }
+
 
 function parseWhitePagesLine(line) {
   const parts = line.trim().split(/\s+/);
@@ -385,6 +388,12 @@ function upsertMessageListEntry(msg) {
     `);
 
   stmt.run(msg);
+
+  // Mark this message as seen in the latest LM
+  db.prepare(`
+      UPDATE messages SET seenInLM = 1 WHERE msgNum = ?
+  `).run(msg.msgNum);
+
 }
 
 function saveMessageBody(msg) {
@@ -588,6 +597,8 @@ async function ensureBbsConnected() {
   });
 }
 
+// -------------------------- OUTBOX SENDING LOGIC -----------------------
+
 ipcMain.handle("sendOutbox", async () => {
   try {
     await uploadOutboxMessages();
@@ -669,25 +680,75 @@ function uploadSingleMessage(msg) {
   });
 }
 
-/* function waitForLine(regex) {
-  return new Promise((resolve, reject) => {
-    const handler = (line) => {
-      if (regex.test(line)) {
-        dataSocket.off("line", handler);
-        resolve(line);
+
+// ----------------- Start of Retrieve Bulk Messages Logic -----------------------
+
+ipcMain.handle('receive-messages', async () => {
+  await ensureBbsConnected();
+
+  // Reset LM flags
+  db.prepare("UPDATE messages SET seenInLM = 0").run();
+
+  // Trigger LIST MODE
+  endOfFileList = false;
+  messageListMode = "bbs";
+  dataSocket.write("LM\r");
+
+  await waitForListModeToFinish();
+
+  // 1. PURGE BASED ON LM LIST (correct)
+  db.prepare(`
+      UPDATE messages
+      SET deleted = 1
+      WHERE seenInLM = 0
+  `).run();
+
+  // 2. NOW determine which private messages need bodies
+  const rows = db.prepare(`
+    SELECT msgNum FROM messages
+    WHERE type='private' AND deleted=0 AND read=0
+  `).all();
+
+  const toDownload = rows.map(r => r.msgNum);
+
+  // 3. READ MODE
+  if (toDownload.length > 0) {
+    endOfReadMode = false;
+    dataSocket.write("R " + toDownload.join(" ") + "\r");
+    await waitForReadModeToFinish();
+  }
+
+  return { downloaded: toDownload.length };
+});
+
+function waitForListModeToFinish() {
+  return new Promise(resolve => {
+    const check = () => {
+      if (endOfFileList === true) {
+        resolve();
+      } else {
+        setTimeout(check, 50);
       }
     };
-
-    dataSocket.on("line", handler);
-
-    // Optional timeout
-    setTimeout(() => {
-      dataSocket.off("line", handler);
-      reject(new Error("Timeout waiting for: " + regex));
-    }, 15000);
+    check();
   });
-}  */
+}
 
+function waitForReadModeToFinish() {
+  return new Promise(resolve => {
+    const check = () => {
+      if (endOfReadMode === true) {
+        resolve();
+      } else {
+        setTimeout(check, 50);
+      }
+    };
+    check();
+  });
+}
+
+
+// -------------------------END OF MAIN LOGIC, START OF YAPP IMPLEMENTATION-------------------------
 
 function handleFileListText(text) {
   console.log("YAPP FILELIST: Received text chunk:", JSON.stringify(text));
@@ -1065,10 +1126,11 @@ ipcMain.handle('vara-connect', async () => {
             const line = parts[i].trim();
             if (!line) continue;
 
-            // End of LIST output
+            // BPQ BBS Prompt = End of LIST output
             if (/^\s*de\s+[A-Z0-9\-]+>/i.test(line)) {
               messageListMode = "local";
               listBuffer = "";
+              endOfFileList = true;
               mainWindow.webContents.send("bbs:list-end");
               return;
             }
@@ -1081,9 +1143,9 @@ ipcMain.handle('vara-connect', async () => {
 
               // Save to DB
               upsertMessageListEntry(parsed);
-
+              console.log("Line added to database:", parsed);
               // Send to renderer
-              mainWindow.webContents.send("bbs:list-line", parsed);
+              //mainWindow.webContents.send("bbs:list-line", parsed);
             }
           }
 
@@ -1145,6 +1207,7 @@ ipcMain.handle('vara-connect', async () => {
             // ⭐ END OF MESSAGE: prompt ONLY if it's the whole line
             if (!footerSeen && /^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
               console.log("END detected: prompt-only line");
+              endOfReadMode = true;
               finishReadMode();
               continue;
             }
@@ -1170,7 +1233,7 @@ ipcMain.handle('vara-connect', async () => {
           const line = parts[i];
           logToRenderer('data', line);
           notifyLineListeners(line);
-          console.log("DATA LINE:", JSON.stringify(line));
+          //console.log("DATA LINE:", JSON.stringify(line));
         }
 
         // Save the incomplete tail (if any)

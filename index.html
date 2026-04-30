@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>VARA BBS Client ver 1.0.10</title>
+    <title>VARA BBS Client ver 1.0.11</title>
     <style>
         body {
             background: #d4dde7;
@@ -87,9 +87,11 @@
             /* prevent tabs from scrolling */
         }
 
-        #msgView {
+        #msgView pre {
             flex: 1;
             overflow-y: auto;
+            /*white-space: break-spaces;
+            overflow-x: anywhere; */
         }
 
         #sendSection {
@@ -552,7 +554,8 @@
             <button id="listBullBtn">List Bulletins</button>
             <button id="listWxBtn">List Weather</button> |
             <button id="composeMsgBtn">Compose Message</button>
-            <button id="sendReceiveBtn" class="main-btn" title="Send Outbox Messages">Send / Receive</button>
+            <button id="sendBtn" class="main-btn" title="Send Outbox Messages">Send Outbox</button>
+            <button id="receiveBtn" class="main-btn" title="Check for New Messages">Get Messages</button>
         </div>
         <div id="statusBar" style="
         display: flex;
@@ -597,7 +600,7 @@
                 </div>
 
                 <!-- ⭐ Message list content goes here -->
-<!--                 <div id="msg-filters" class="msg-filters">
+                <!--                 <div id="msg-filters" class="msg-filters">
                     <button data-filter="all">All</button>
                     <button data-filter="unread">Unread</button>
                     <button data-filter="read">Read</button>
@@ -691,7 +694,8 @@
             const listBullBtn = document.getElementById('listBullBtn');
             const listWxBtn = document.getElementById('listWxBtn');
             const listNewBtn = document.getElementById('listNewBtn');
-            const sendReceiveBtn = document.getElementById('sendReceiveBtn');
+            const sendBtn = document.getElementById('sendBtn');
+            const receiveBtn = document.getElementById('receiveBtn');
             const commandConsole = document.getElementById('commandConsole');
             const commandInput = document.getElementById('commandInput');
             const rxArea = document.getElementById('rxArea');
@@ -882,6 +886,8 @@
                         // Render into right pane
                         const viewer = document.getElementById("msgView");
                         viewer.innerHTML = `<pre>${msg.body || "(Fetching message...)"}</pre>`;
+                        row.classList.setAttribute("data-read", "1");
+
                     });
 
                     // RIGHT CLICK = context menu
@@ -1092,7 +1098,8 @@
                 listWxBtn.disabled = !connected;
                 listNewBtn.disabled = !connected;
                 composeMsgBtn.disabled = !connected;
-                sendReceiveBtn.disabled = !connected;
+                sendBtn.disabled = !connected;
+                receiveBtn.disabled = !connected;
 
                 statusVara.textContent = connected ? "Connected" : "Disconnected";
                 statusVara.style.color = connected ? "#0f0" : "#f33";
@@ -1880,12 +1887,23 @@
                 try {
                     await sendBbsCommand("L");
                 } catch (err) {
-                    appendCommand('error', 'List All failed: ' + err.message);
+                    appendCommand('error', 'List New failed: ' + err.message);
                 }
             });
 
-            document.getElementById("sendReceiveBtn").addEventListener("click", () => {
+            document.getElementById("sendBtn").addEventListener("click", () => {
                 window.electronAPI.sendOutbox();
+            });
+
+            document.getElementById("receiveBtn").addEventListener("click", async () => {
+                const result = await window.electronAPI.receiveMessages();
+
+                if (result.error) {
+                    showToast("Receive failed: " + result.error);
+                } else {
+                    showToast(`Downloaded ${result.downloaded} messages`);
+                    refreshMessageList();
+                }
             });
 
             // Message click handler (event delegation)
