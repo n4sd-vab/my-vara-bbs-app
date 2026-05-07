@@ -585,7 +585,7 @@
             <button id="receiveBtn" class="main-btn" title="Download New Message List">Get Messages</button>
             <button id="composeMsgBtn">Compose Message</button>
             <button id="sendBtn" class="main-btn" title="Send Outbox Messages">Send Outbox</button>
-            
+
         </div>
         <div id="statusBar" style="
         display: flex;
@@ -933,6 +933,11 @@
                     <div class="menu-item" data-action="archive">Move to Archive</div>
                     <div class="menu-item" data-action="delete">Delete</div>
                     <div class="menu-item" data-action="move">Move to...</div>
+                    ${currentMessageTab === "bulletin"
+                        ? `<div class="menu-item" data-action="filter-category">Filter by Category (${msg.recipient})</div>`
+                        : ""
+                    }
+
                 `;
 
                 document.body.appendChild(menu);
@@ -971,6 +976,12 @@
                     if (action === "move") {
                         // Future: open category picker
                         showToast("Move-to-category not implemented yet");
+                    }
+
+                    if (action === "filter-category") {
+                        window.electronAPI.filterBulletins(msg.recipient);
+                        menu.remove();
+                        return;
                     }
 
                     menu.remove();
@@ -1063,7 +1074,7 @@
 
                 window.electronAPI.getBulletinCategories().then(categories => {
 
-                    // Add "All Categories"
+                    // "All Categories" button
                     const allBtn = document.createElement("button");
                     allBtn.textContent = "All Categories";
                     allBtn.onclick = () => {
@@ -1072,12 +1083,12 @@
                     };
                     list.appendChild(allBtn);
 
-                    // Add each category as a list item
+                    // Each category with count
                     categories.forEach(cat => {
                         const btn = document.createElement("button");
-                        btn.textContent = cat;
+                        btn.textContent = `${cat.category} (${cat.count})`;
                         btn.onclick = () => {
-                            window.electronAPI.filterBulletins(cat);
+                            window.electronAPI.filterBulletins(cat.category);
                             modal.style.display = "none";
                         };
                         list.appendChild(btn);
@@ -1545,7 +1556,7 @@
                 }
             });
 
-            async function showCategoryPopup() {
+            /* async function showCategoryPopup() {
                 const modal = document.getElementById("categoryModal");
                 const list = document.getElementById("categoryList");
                 const cancelBtn = document.getElementById("categoryCancel");
@@ -1583,7 +1594,7 @@
 
                 // Show modal
                 modal.style.display = "flex";
-            }
+            } */
 
             document.getElementById("yappModalDirButton").addEventListener("click", async () => {
                 const dir = await window.electronAPI.pickDirectory();

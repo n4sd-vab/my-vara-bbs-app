@@ -626,13 +626,13 @@ ipcMain.on("bbs-state", (_event, state) => {
 });
 
 ipcMain.on("bbs:filter-bulletins", (event, category) => {
-    let rows;
-    if (category === "ALL") {
-        rows = db.prepare("SELECT * FROM messages WHERE type='bulletin' ORDER BY msgNum DESC").all();
-    } else {
-        rows = db.prepare("SELECT * FROM messages WHERE type='bulletin' AND recipient = ? ORDER BY msgNum DESC").all(category);
-    }
-    mainWindow.webContents.send("bbs:bulletin-list", rows);
+  let rows;
+  if (category === "ALL") {
+    rows = db.prepare("SELECT * FROM messages WHERE type='bulletin' ORDER BY msgNum DESC").all();
+  } else {
+    rows = db.prepare("SELECT * FROM messages WHERE type='bulletin' AND recipient = ? ORDER BY msgNum DESC").all(category);
+  }
+  mainWindow.webContents.send("bbs:bulletin-list", rows);
 });
 
 // Function to ensure BBS connection before sending messages, 
@@ -730,7 +730,7 @@ function uploadSingleMessage(msg) {
 
       // 7. Update DB
       const date = new Date();
-      const formatter = new Intl.DateTimeFormat('en-GB', {day: '2-digit', month: 'short', timeZone: 'UTC'});
+      const formatter = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' });
       // Format and replace space with hyphen
       const formattedDate = formatter.format(date).replace(' ', '-');
 
@@ -1754,35 +1754,36 @@ ipcMain.handle("markMessageRead", (event, id) => {
 });
 
 ipcMain.handle("bbs:get-bulletin-categories", () => {
-    const rows = db.prepare(`
-        SELECT DISTINCT recipient
+  const rows = db.prepare(`
+        SELECT TRIM(recipient) AS category, COUNT(*) AS count
         FROM messages
         WHERE type='bulletin'
-        ORDER BY recipient ASC
+        GROUP BY TRIM(recipient)
+        ORDER BY category ASC
     `).all();
 
-    return rows.map(r => r.recipient);
+  return rows;   // now returns [{category:"WX", count:12}, ...]
 });
 
 ipcMain.on("bbs:filter-bulletins", (event, category) => {
-    let rows;
+  let rows;
 
-    if (category === "ALL") {
-        rows = db.prepare(`
+  if (category === "ALL") {
+    rows = db.prepare(`
             SELECT * FROM messages
             WHERE type='bulletin'
             ORDER BY msgNum DESC
         `).all();
-    } else {
-        rows = db.prepare(`
+  } else {
+    rows = db.prepare(`
             SELECT * FROM messages
             WHERE type='bulletin'
               AND TRIM(recipient) = ?
             ORDER BY msgNum DESC
         `).all(category);
-    }
-    console.log("Filtering bulletins for category:", category, "rows:", rows.length);
-    event.sender.send("bbs:bulletin-list", rows);
+  }
+  console.log("Filtering bulletins for category:", category, "rows:", rows.length);
+  event.sender.send("bbs:bulletin-list", rows);
 });
 
 ipcMain.on("bbs:read-message", (event, msgNum) => {
