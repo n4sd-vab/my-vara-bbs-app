@@ -75,6 +75,23 @@ ipcMain.on("settings-updated", (_event, newSettings) => {
   console.log("Main updated settings:", appSettings);
 });
 
+ipcMain.on("create-menu", (event, template) => {
+  const menu = new Menu();
+
+  template.forEach(item => {
+    const menuItem = new MenuItem({
+      label: item.label,
+      click: () => {
+        // Send back to renderer to handle the action
+        event.sender.send("menu-item-clicked", item.label);
+      }
+    });
+    menu.append(menuItem);
+  });
+
+  menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
+});
+
 
 let mainWindow;
 let cmdSocket = null;
@@ -209,7 +226,10 @@ function createWindow() {
     width: 1200,
     height: 900,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+
     }
   });
 
@@ -396,10 +416,13 @@ function upsertMessageListEntry(msg) {
 
 }
 
-function saveMessageBody(msg) {
+function saveMessageBody(msgNum, body) {
   db.prepare(`
-        UPDATE messages SET body=@body WHERE msgNum=@msgNum
-    `).run(msg);
+        UPDATE messages
+        SET body = ?
+        WHERE msgNum = ?
+    `).run(body, msgNum);
+  console.log("DB SAVE", msgNum, "len", body.length);
 }
 
 function saveOutboxMessage(msg) {
@@ -414,9 +437,33 @@ function saveOutboxMessage(msg) {
 
   const typeCode = msg.type;
   const type = msg.type === "P" ? "private" : "bulletin";
+
+  console.log("Saving outbox message to DB:", { ...msg, date: formattedDate, typeCode, type });
   db.prepare(`
         INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, outbox, sent)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+    `).run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
+
+  return true;
+}
+
+function saveMessage(msg) {
+  const date = new Date();
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    timeZone: 'UTC'
+  });
+  // Format and replace space with hyphen
+  const formattedDate = formatter.format(date).replace(' ', '-');
+
+  const typeCode = msg.type; // single character code like "P" or "B"
+  const type = msg.type === "P" ? "private" : "bulletin";
+
+  console.log("Saving message to DB(2):", { ...msg, date: formattedDate, typeCode, type });
+  db.prepare(`
+        INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, saved, outbox)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
     `).run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
 
   return true;
@@ -513,15 +560,15 @@ function finishReadMode() {
   console.log("READ MODE END for message", currentReadMsgNum);
   console.log("READ MODE: accumulated body length =", currentReadBody.length);
 
-  saveMessageBody({
-    msgNum: currentReadMsgNum,
-    body
-  });
+  // ⭐ FIXED: call with positional parameters
+  saveMessageBody(currentReadMsgNum, body);
 
+  // Renderer still gets the object — that's fine
   mainWindow.webContents.send("bbs:message-body", {
     msgNum: currentReadMsgNum,
     body
   });
+  mainWindow.webContents.send("bbs:message-read", currentReadMsgNum);
 
   currentReadBody = [];
   readBuffer = "";
@@ -555,6 +602,11 @@ ipcMain.handle("deleteMessage", (_event, msgNum) => {
   deleteMessage(msgNum);
 });
 
+ipcMain.handle("sendBbsMessage", async (_event, msg) => {
+  await uploadSingleMessage(msg);
+  return true;
+});
+
 function markMessageSaved(msgNum) {
   db.prepare("UPDATE messages SET saved = 1 WHERE msgNum = ?").run(msgNum);
   console.log("Message marked as saved in DB:", msgNum);
@@ -571,6 +623,16 @@ ipcMain.on("bbs-state", (_event, state) => {
   if (state.bbsPromptReady !== undefined) bbsPromptReady = state.bbsPromptReady;
 
   console.log("MAIN BBS STATE:", { bbsLinkUp, bbsPromptReady });
+});
+
+ipcMain.on("bbs:filter-bulletins", (event, category) => {
+    let rows;
+    if (category === "ALL") {
+        rows = db.prepare("SELECT * FROM messages WHERE type='bulletin' ORDER BY msgNum DESC").all();
+    } else {
+        rows = db.prepare("SELECT * FROM messages WHERE type='bulletin' AND recipient = ? ORDER BY msgNum DESC").all(category);
+    }
+    mainWindow.webContents.send("bbs:bulletin-list", rows);
 });
 
 // Function to ensure BBS connection before sending messages, 
@@ -628,14 +690,16 @@ function uploadSingleMessage(msg) {
   return new Promise(async (resolve, reject) => {
 
     try {
+      console.log("Uploading message to BBS:", msg);
       await ensureBbsConnected();
 
       // Register waiters BEFORE sending SP
       const wTitle = waitForLine(/Enter Title/i);
       const wAddress = waitForLine(/Address/i);
-
+      const sendcmd = msg.type === "P" ? `SP ${msg.recipient}\r` : `SB ${msg.recipient}\r`;
       // Send SP
-      dataSocket.write(`SP ${msg.recipient}\r`);
+
+      dataSocket.write(sendcmd);
 
       // Wait for whichever comes first
       await Promise.race([wTitle, wAddress]);
@@ -657,7 +721,7 @@ function uploadSingleMessage(msg) {
       // End message
       dataSocket.write("/ex\r");
 
-      // Wait for Message: ### Size: ###
+      // Wait for Message: ### Size: ###  At: ####
       const result = await waitForLine(/Message:\s+(\d+).*Size:\s+(\d+)/i);
 
       const match = result.match(/Message:\s+(\d+).*Size:\s+(\d+)/i);
@@ -665,11 +729,16 @@ function uploadSingleMessage(msg) {
       const size = match[2];
 
       // 7. Update DB
+      const date = new Date();
+      const formatter = new Intl.DateTimeFormat('en-GB', {day: '2-digit', month: 'short', timeZone: 'UTC'});
+      // Format and replace space with hyphen
+      const formattedDate = formatter.format(date).replace(' ', '-');
+
       db.prepare(`
                 UPDATE messages
                 SET msgNum = ?, size = ?, sent = 1, outbox = 0, date = ?
                 WHERE id = ?
-            `).run(msgNum, size, new Date().toISOString().slice(0, 10), msg.id);
+            `).run(msgNum, size, formattedDate, msg.id);
 
       resolve();
 
@@ -679,7 +748,6 @@ function uploadSingleMessage(msg) {
     }
   });
 }
-
 
 // ----------------- Start of Retrieve Bulk Messages Logic -----------------------
 
@@ -692,15 +760,17 @@ ipcMain.handle('receive-messages', async () => {
   // Trigger LIST MODE
   endOfFileList = false;
   messageListMode = "bbs";
-  dataSocket.write("LM\r");
+  dataSocket.write("L\r"); //change to 
 
   await waitForListModeToFinish();
 
-  // 1. PURGE BASED ON LM LIST (correct)
+  // 1. PURGE BASED ON LM LIST and ARCHIVE(saved) status 
+  // this ensures we don't accidentally delete messages that 
+  // are still on the BBS but just not in the latest LM (e.g., because they were read on another client), while also cleaning up messages that are truly gone from the BBS and not saved locally
   db.prepare(`
       UPDATE messages
       SET deleted = 1
-      WHERE seenInLM = 0
+      WHERE type='private' AND seenInLM = 0 AND saved = 0
   `).run();
 
   // 2. NOW determine which private messages need bodies
@@ -746,7 +816,6 @@ function waitForReadModeToFinish() {
     check();
   });
 }
-
 
 // -------------------------END OF MAIN LOGIC, START OF YAPP IMPLEMENTATION-------------------------
 
@@ -831,7 +900,6 @@ function buildYappDataBlock(chunk, isFinal) {
   chunk.copy(block, o);
   return block;
 }
-
 
 function computeChecksum(buffer) {
   let checksum = 0;
@@ -1153,6 +1221,8 @@ ipcMain.handle('vara-connect', async () => {
           listBuffer = parts[parts.length - 1];
           return;
         }
+
+
         // ----------------------------------------------------
         // 6. READ MODE (message body retrieval)
         // ----------------------------------------------------
@@ -1167,15 +1237,24 @@ ipcMain.handle('vara-connect', async () => {
           for (let i = 0; i < parts.length - 1; i++) {
             const line = parts[i].trim();
 
-            const readStart = line.match(/^:(\d+)/) || line.match(/^Message\s+#?(\d+)/i);
+            // Start of message: "From: ..."
+            const readStart =
+              line.match(/^From:\s+(.+)/i) ||
+              line.match(/^(?:de\s+[A-Z0-9\-]+>)?Message\s+#?(\d+)\s+from/i);
             console.log("readStart = ", readStart);
+
             if (readStart) {
               inReadMode = true;
-              currentReadMsgNum = parseInt(readStart[1]);
+              currentReadMsgNum = null;
               currentReadBody = [];
-              readBuffer = "";   // reset buffer for body
-              console.log("READ MODE START for message", currentReadMsgNum);
-              return;            // swallow start line
+
+              // ⭐ KEEP the From: line
+              currentReadBody.push(line);
+
+              readBuffer = "";
+              footerSeen = false;
+              console.log("READ MODE START (From: line)");
+              continue;
             }
           }
 
@@ -1183,7 +1262,9 @@ ipcMain.handle('vara-connect', async () => {
           // Not in READ mode yet → fall through to normal text
         }
 
-        // Accumulate READ body
+        // ----------------------------------------------------
+        // READ MODE ACTIVE
+        // ----------------------------------------------------
         if (inReadMode) {
           const text = data.toString();
           readBuffer += text;
@@ -1196,29 +1277,59 @@ ipcMain.handle('vara-connect', async () => {
 
             console.log("READ MODE line:", JSON.stringify(line));
 
-            // ⭐ END OF MESSAGE: explicit footer
-            if (/^\[End of Message #(\d+)/i.test(line)) {
-              footerSeen = true;
-              console.log("END detected: explicit footer");
-              finishReadMode();
+            // 1. END OF MESSAGE (explicit footer) – extract msgNum here
+            const footer = line.match(/^\[End of Message #(\d+)/i);
+            if (footer) {
+              const msgNum = parseInt(footer[1]);
+              console.log("END detected: explicit footer for msg", msgNum);
+
+              // ⭐ KEEP the footer line
+              currentReadBody.push(line);
+
+              saveMessageBody(msgNum, currentReadBody.join("\n"));
+
+              //db.prepare("UPDATE messages SET read = 1 WHERE msgNum = ?").run(msgNum);
+
+              currentReadBody = [];
+              currentReadMsgNum = null;
               continue;
             }
 
-            // ⭐ END OF MESSAGE: prompt ONLY if it's the whole line
-            if (!footerSeen && /^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
+            // 2. END OF READ MODE (prompt)
+            if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
               console.log("END detected: prompt-only line");
               endOfReadMode = true;
-              finishReadMode();
-              continue;
+
+              // nothing to save here; footer already handled last message
+              inReadMode = false;
+              currentReadMsgNum = null;
+              currentReadBody = [];
+              readBuffer = "";
+              footerSeen = false;
+              return;
             }
 
-            // ⭐ Normal body line (including blank lines)
+            // 3. START OF NEXT MESSAGE (From:) inside READ MODE
+            const nextStart = line.match(/^From:\s+(.+)/i);
+            if (nextStart) {
+              console.log("START of next message (From: line)");
+              // Start new body
+              currentReadBody = [];
+
+              // ⭐ KEEP the From: line
+              currentReadBody.push(line);
+
+              continue;               // swallow this line; body lines follow
+            }
+
+            // 4. Normal body line (including blank lines)
             currentReadBody.push(raw);
           }
 
           readBuffer = parts[parts.length - 1];
           return;
         }
+
         // -------------------------
         // 4. NORMAL BBS TEXT MODE
         // -------------------------
@@ -1254,7 +1365,6 @@ ipcMain.handle('vara-connect', async () => {
     });
   });
 });
-
 
 //----------------------YAPP SEND LOGIC----------------------//
 function setInYappSend(val) {
@@ -1643,6 +1753,38 @@ ipcMain.handle("markMessageRead", (event, id) => {
   db.prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
 });
 
+ipcMain.handle("bbs:get-bulletin-categories", () => {
+    const rows = db.prepare(`
+        SELECT DISTINCT recipient
+        FROM messages
+        WHERE type='bulletin'
+        ORDER BY recipient ASC
+    `).all();
+
+    return rows.map(r => r.recipient);
+});
+
+ipcMain.on("bbs:filter-bulletins", (event, category) => {
+    let rows;
+
+    if (category === "ALL") {
+        rows = db.prepare(`
+            SELECT * FROM messages
+            WHERE type='bulletin'
+            ORDER BY msgNum DESC
+        `).all();
+    } else {
+        rows = db.prepare(`
+            SELECT * FROM messages
+            WHERE type='bulletin'
+              AND TRIM(recipient) = ?
+            ORDER BY msgNum DESC
+        `).all(category);
+    }
+    console.log("Filtering bulletins for category:", category, "rows:", rows.length);
+    event.sender.send("bbs:bulletin-list", rows);
+});
+
 ipcMain.on("bbs:read-message", (event, msgNum) => {
   currentReadMsgNum = msgNum;
   currentReadBody = [];
@@ -1676,6 +1818,10 @@ ipcMain.on("send-to-bbs", (event, cmd) => {
   menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
 }); */
 
+
+
+
+
 ipcMain.handle("sendReceive", async () => {
   await ensureVaraConnected();
   await ensureBbsConnected();
@@ -1695,6 +1841,11 @@ ipcMain.handle("replyToMessage", (_event, msgNum) => {
 ipcMain.handle("saveOutboxMessage", (_event, message) => {
   return saveOutboxMessage(message);
 });
+
+ipcMain.handle("saveMessage", (_event, message) => {
+  return saveMessage(message);
+});
+
 
 
 
@@ -1877,3 +2028,4 @@ console.log("DB Path:", dbPath);
 ipcMain.handle("addressbook-debug", () => {
   return db.prepare("SELECT * FROM address_book").all();
 });
+//----------------------END OF YAPP SEND LOGIC----------------------//

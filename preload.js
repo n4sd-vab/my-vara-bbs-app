@@ -15,15 +15,13 @@ contextBridge.exposeInMainWorld('vara', {
     }
 });
 
-
 contextBridge.exposeInMainWorld('settings', {
-  get: () => ipcRenderer.invoke('settings-get'),
-  set: (data) => {
-    ipcRenderer.invoke('settings-set', data);
-    ipcRenderer.send('settings-updated', data);
-  }
+    get: () => ipcRenderer.invoke('settings-get'),
+    set: (data) => {
+        ipcRenderer.invoke('settings-set', data);
+        ipcRenderer.send('settings-updated', data);
+    }
 });
-
 
 contextBridge.exposeInMainWorld("electronAPI", {
 
@@ -45,7 +43,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.on("message-deleted", (_e, msgNum) => callback(msgNum)),
 
     markMessageSaved: (id) => ipcRenderer.invoke("markMessageSaved", id),
-    
+
     onMessageSaved: (callback) =>
         ipcRenderer.on("message-saved", (_e, msgNum) => callback(msgNum)),
 
@@ -53,6 +51,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     sendOutbox: () => ipcRenderer.invoke("sendOutbox"),
 
+    sendBbsMessage: (msg) => ipcRenderer.invoke("sendBbsMessage", msg),
 
     receiveMessages: () => ipcRenderer.invoke('receive-messages'),
 
@@ -61,10 +60,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     saveOutboxMessage: (message) => ipcRenderer.invoke("saveOutboxMessage", message),
 
+    saveMessage: (message) => ipcRenderer.invoke("saveMessage", message),
+
     sendReceive: () => ipcRenderer.send("sendReceive"),
 
     replyToMessage: (msgNum) => ipcRenderer.invoke("replyToMessage", msgNum),
-    
+
     onOpenAddressBookAdd: (callback) =>
         ipcRenderer.on("open-address-book-add", () => callback()),
 
@@ -114,7 +115,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onYappFileList: (callback) => ipcRenderer.on('yapp-file-list', (_e, files) => callback(files)),
 
     pickDirectory: () => ipcRenderer.invoke("pick-directory"),
-    
+
     saveSetting: (key, value) => ipcRenderer.invoke("save-setting", { key, value }),
     getSetting: (key) => ipcRenderer.invoke("get-setting", key),
 
@@ -130,7 +131,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onYappSendProgress: (callback) =>
         ipcRenderer.on("yapp-send-progress", (event, data) => callback(data)),
 
-    
+    // popup menu for bulletin list filtering
+    createMenu: (template) => ipcRenderer.send("create-menu", template),
 
+    filterBulletins: (category) => ipcRenderer.send("bbs:filter-bulletins", category),
+
+    getBulletinCategories: () => ipcRenderer.invoke("bbs:get-bulletin-categories"),
+
+    onBulletinList: (callback) => {
+        ipcRenderer.on("bbs:bulletin-list", (event, rows) => callback(rows));
+    },
+
+    onMenuItemClicked: (callback) => {
+        ipcRenderer.on("menu-item-clicked", (event, label) => callback(label));
+    }
 });
 console.log("PRELOAD LOADED");
