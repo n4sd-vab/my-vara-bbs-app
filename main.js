@@ -752,44 +752,32 @@ function uploadSingleMessage(msg) {
 // ----------------- Start of Retrieve Bulk Messages Logic -----------------------
 
 ipcMain.handle('receive-messages', async () => {
-  await ensureBbsConnected();
+    await ensureBbsConnected();
 
-  // Reset LM flags
-  db.prepare("UPDATE messages SET seenInLM = 0").run();
+    // FAST SYNC: only get NEW messages
+    endOfFileList = false;
+    messageListMode = "bbs";
+    dataSocket.write("L\r");   // NEW messages only
 
-  // Trigger LIST MODE
-  endOfFileList = false;
-  messageListMode = "bbs";
-  dataSocket.write("L\r"); //change to 
+    await waitForListModeToFinish();
 
-  await waitForListModeToFinish();
+    // Determine which private messages need bodies
+    const rows = db.prepare(`
+        SELECT msgNum FROM messages
+        WHERE type='private' AND deleted=0 AND read=0
+    `).all();
 
-  // 1. PURGE BASED ON LM LIST and ARCHIVE(saved) status 
-  // this ensures we don't accidentally delete messages that 
-  // are still on the BBS but just not in the latest LM (e.g., because they were read on another client), while also cleaning up messages that are truly gone from the BBS and not saved locally
-  db.prepare(`
-      UPDATE messages
-      SET deleted = 1
-      WHERE type='private' AND seenInLM = 0 AND saved = 0
-  `).run();
+    const toDownload = rows.map(r => r.msgNum);
 
-  // 2. NOW determine which private messages need bodies
-  const rows = db.prepare(`
-    SELECT msgNum FROM messages
-    WHERE type='private' AND deleted=0 AND read=0
-  `).all();
+    if (toDownload.length > 0) {
+        endOfReadMode = false;
+        dataSocket.write("R " + toDownload.join(" ") + "\r");
+        await waitForReadModeToFinish();
+    }
 
-  const toDownload = rows.map(r => r.msgNum);
-
-  // 3. READ MODE
-  if (toDownload.length > 0) {
-    endOfReadMode = false;
-    dataSocket.write("R " + toDownload.join(" ") + "\r");
-    await waitForReadModeToFinish();
-  }
-
-  return { downloaded: toDownload.length };
+    return { downloaded: toDownload.length };
 });
+
 
 function waitForListModeToFinish() {
   return new Promise(resolve => {
@@ -817,6 +805,45 @@ function waitForReadModeToFinish() {
   });
 }
 
+ipcMain.handle('full-sync', async () => {
+    await ensureBbsConnected();
+
+    //
+    // 1. PRIVATE MESSAGE FULL SYNC (LP)
+    //
+    db.prepare("UPDATE messages SET seenInLP = 0 WHERE type='private'").run();
+
+    endOfFileList = false;
+    messageListMode = "lp";
+    dataSocket.write("LP\r");
+
+    await waitForListModeToFinish();
+
+    db.prepare(`
+        UPDATE messages
+        SET deleted = 1
+        WHERE type='private' AND seenInLP = 0 AND saved = 0
+    `).run();
+
+    //
+    // 2. BULLETIN FULL SYNC (LB)
+    //
+    db.prepare("UPDATE messages SET seenInLB = 0 WHERE type='bulletin'").run();
+
+    endOfFileList = false;
+    messageListMode = "lb";
+    dataSocket.write("LB\r");
+
+    await waitForListModeToFinish();
+
+    db.prepare(`
+        UPDATE messages
+        SET deleted = 1
+        WHERE type='bulletin' AND seenInLB = 0 AND saved = 0
+    `).run();
+
+    return { status: "full-sync-complete" };
+});
 // -------------------------END OF MAIN LOGIC, START OF YAPP IMPLEMENTATION-------------------------
 
 function handleFileListText(text) {
