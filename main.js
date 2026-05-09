@@ -159,7 +159,7 @@ const menuTemplate = [
       {
         label: "WhitePages Import",
         click: () => {
-          mainWindow.webContents.send("whitepages:open-import");
+          mainWindow.webContents.send("whitepages:open-modal");
         }
       }
     ]

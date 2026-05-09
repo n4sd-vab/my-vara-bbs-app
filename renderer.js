@@ -25,6 +25,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const composeSubject = document.getElementById('composeSubject');
     const composeType = document.getElementById('composeType');
 
+    const addressBookBtn = document.getElementById('addressBookBtn');
     const addressBookModal = document.getElementById('addressBookModal');
     const addressBookCancelBtn = document.getElementById('addressBookCancelBtn');
     const addressBookSaveBtn = document.getElementById('addressBookSaveBtn');
@@ -83,6 +84,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     const composeSendBtn = document.getElementById('composeSendBtn');
     const composeSaveBtn = document.getElementById('composeSaveBtn');
     const composeBody = document.getElementById('composeBody');
+
+    const whitePagesModal = document.getElementById('whitePagesModal');
+    const wpQuery = document.getElementById('wpQuery');
+    const wpRunQueryBtn = document.getElementById('wpRunQueryBtn');
+    const wpResults = document.getElementById('wpResults');
+    const wpCancelBtn = document.getElementById('wpCancelBtn');
+    const wpImportBtn = document.getElementById('wpImportBtn');
 
     const listPanel = document.getElementById("messageTabs");
 
@@ -260,7 +268,6 @@ window.addEventListener('DOMContentLoaded', async () => {
                 viewer.innerHTML = `<pre>${msg.body || "(Fetching message...)"}</pre>`;
                 row.classList.add("data-read=1");
                 row.classList.remove("data-read=0");
-
             });
 
             // RIGHT CLICK = context menu
@@ -524,6 +531,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         listBullBtn.disabled = !connected;
         listWxBtn.disabled = !connected;
         listNewBtn.disabled = !connected; */
+        addressBookBtn.disabled = !connected;
         composeMsgBtn.disabled = !connected;
         sendBtn.disabled = !connected;
         receiveBtn.disabled = !connected;
@@ -545,10 +553,15 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function displayMessage(msg) {
         console.log("displayMessage called with:", msg);
-        const viewer = document.getElementById("msgView");
-        console.log("Setting viewer innerHTML to:", `<pre>${msg.body}</pre>`);
-        viewer.innerHTML = `<pre>${msg.body}</pre>`;
-        console.log("Viewer innerHTML is now:", viewer.innerHTML);
+        // Only update the viewer if this message is the currently displayed one
+        if (msg.msgNum === currentDisplayedMsgNum) {
+            const viewer = document.getElementById("msgView");
+            console.log("Setting viewer innerHTML to:", `<pre>${msg.body}</pre>`);
+            viewer.innerHTML = `<pre>${msg.body}</pre>`;
+            console.log("Viewer innerHTML is now:", viewer.innerHTML);
+        } else {
+            console.log("Ignoring displayMessage for msgNum", msg.msgNum, "because current is", currentDisplayedMsgNum);
+        }
     }
 
     async function saveOutboxMessage(message) {
@@ -799,6 +812,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         renderAddressBookTable();
     });
 
+    addressBookBtn.addEventListener('click', async () => {
+        addressBookViewModal.style.display = "flex";
+        renderAddressBookTable();
+    });
+
     document.addEventListener("click", (e) => {
         if (e.target.classList.contains("ab-callsign")) {
             const callsign = e.target.dataset.callsign;
@@ -839,16 +857,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById("whitePagesWindow")
         .addEventListener("click", e => e.stopPropagation());
 
-    wpRunQueryBtn.addEventListener('click', () => {
+    wpRunQueryBtn.addEventListener('click', async () => {
         const query = wpQuery.value.trim();
         console.log("Running WhitePages query:", query);
         if (!query) return;
 
+        await ensureBbsConnected();
         window.electronAPI.startWhitePagesMode();
 
         wpResults.innerHTML = "Querying BBS...";
 
-        sendBbsCommand(query + "\r");
+        await sendBbsCommand(query + "\r");
     });
 
     window.electronAPI.onWhitePagesLine((entry) => {
@@ -868,27 +887,31 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 
     // Listen for message body responses from main process
-    window.electronAPI.onMessageBody((msg) => {
+    window.electronAPI.onMessageBody(async (msg) => {
         console.log("🎯 onMessageBody EVENT RECEIVED:", msg);
         console.log("Renderer received message body:", msg.msgNum, "currentDisplayedMsgNum:", currentDisplayedMsgNum);
-        
-        // TEMP: Always display for debugging - update UI to show we received the event
-        const viewer = document.getElementById("msgView");
-        viewer.innerHTML = `<pre>📨 EVENT RECEIVED for msg ${msg.msgNum} - displaying body...</pre>`;
-        setTimeout(() => {
-            displayMessage(msg);
-        }, 500);
-            displayMessage(msg);
 
-            // Fetch the full message from DB (now updated)
-            window.electronAPI.getMessageByMsgNum(msg.msgNum).then(fullMsg => {
-                // Double-check it's still the current message
-                if (fullMsg.msgNum === currentDisplayedMsgNum) {
-                    console.log("Displaying full message from DB for msgNum:", fullMsg.msgNum);
-                    displayMessage(fullMsg);
-                }
-            });
-                
+        if (msg.msgNum !== currentDisplayedMsgNum) {
+            console.log("Ignoring body event for non-current message", msg.msgNum);
+            return;
+        }
+
+        window.showToast(`Message #${msg.msgNum} downloaded`);
+
+        let fullMsg = null;
+        const start = Date.now();
+
+        while (Date.now() - start < 10000) {
+            fullMsg = await window.electronAPI.getMessageByMsgNum(msg.msgNum);
+            if (fullMsg && fullMsg.body && fullMsg.body.trim() !== "") break;
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        if (fullMsg && fullMsg.body && fullMsg.body.trim() !== "") {
+            displayMessage(fullMsg);
+        } else {
+            displayMessage(msg);
+        }
     });
 
     window.electronAPI.onBulletinList((rows) => {
@@ -1308,6 +1331,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         ]);
     });
 
+
+       /*  addressBookBtn.addEventListener('click', () => {
+            window.electronAPI.openAddressBookAdd();
+        }); */
 
     // List Mine (LM) updated to use sendBbsCommand helper which ensures BBS connection and routes through main process
 

@@ -156,7 +156,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // WHITE PAGES IMPORT
     //
     startWhitePagesMode: () =>
-        ipcRenderer.send("whitepages:start"),
+        ipcRenderer.send("whitepages-start"),
 
     onOpenWhitePagesModal: (callback) =>
         ipcRenderer.on("whitepages:open-modal", callback),

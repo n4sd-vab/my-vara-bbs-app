@@ -364,7 +364,16 @@ class BbsProtocol {
         console.log("END detected: explicit footer for msg", msgNum);
 
         this.currentReadBody.push(line);
-        this.database.saveMessageBody(msgNum, this.currentReadBody.join("\n"));
+        const body = this.currentReadBody.join("\n");
+        this.database.saveMessageBody(msgNum, body);
+
+        // Notify the renderer once the body is written to the DB
+        this.sendToRenderer("bbs:message-body", {
+          msgNum,
+          body
+        });
+        this.sendToRenderer("bbs:message-read", msgNum);
+
         this.currentReadBody = [];
         continue;
       }
