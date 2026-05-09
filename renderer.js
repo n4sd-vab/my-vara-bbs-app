@@ -59,10 +59,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     const connectBtn = document.getElementById('connectBtn');
     const connectBbsBtn = document.getElementById('connectBbsBtn');
     const disconnectBbsBtn = document.getElementById('disconnectBbsBtn');
-    const listMineBtn = document.getElementById('listMineBtn');
+    /* const listMineBtn = document.getElementById('listMineBtn');
     const listBullBtn = document.getElementById('listBullBtn');
     const listWxBtn = document.getElementById('listWxBtn');
-    const listNewBtn = document.getElementById('listNewBtn');
+    const listNewBtn = document.getElementById('listNewBtn'); */
     const sendBtn = document.getElementById('sendBtn');
     const receiveBtn = document.getElementById('receiveBtn');
     const commandConsole = document.getElementById('commandConsole');
@@ -520,10 +520,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         disconnectBbsBtn.disabled = !connected;
 
         connectBbsBtn.disabled = !connected;
-        listMineBtn.disabled = !connected;
+    /*     listMineBtn.disabled = !connected;
         listBullBtn.disabled = !connected;
         listWxBtn.disabled = !connected;
-        listNewBtn.disabled = !connected;
+        listNewBtn.disabled = !connected; */
         composeMsgBtn.disabled = !connected;
         sendBtn.disabled = !connected;
         receiveBtn.disabled = !connected;
@@ -888,9 +888,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     displayMessage(fullMsg);
                 }
             });
-        } else {
-            console.log("Ignoring message body - not currently displayed. Received:", msg.msgNum, "Displayed:", currentDisplayedMsgNum);
-        }
+                
     });
 
     window.electronAPI.onBulletinList((rows) => {
@@ -1313,7 +1311,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // List Mine (LM) updated to use sendBbsCommand helper which ensures BBS connection and routes through main process
 
-    listMineBtn.addEventListener("click", async () => {
+   /*  listMineBtn.addEventListener("click", async () => {
         // clearMessageWindows();
         appendCommand("local", "TX: LM");
         try {
@@ -1352,7 +1350,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         } catch (err) {
             appendCommand('error', 'List New failed: ' + err.message);
         }
-    });
+    }); */
 
     document.getElementById("sendBtn").addEventListener("click", () => {
         window.electronAPI.sendOutbox();
