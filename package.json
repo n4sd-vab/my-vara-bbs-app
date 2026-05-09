@@ -1,8 +1,8 @@
 {
   "name": "my-vara-bbs-app",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Native VARA BBS Client",
-  "main": "main.js",
+  "main": "src/main.js",
   "scripts": {
     "start": "electron-forge start",
     "test": "echo \"Error: no test specified\" && exit 1",

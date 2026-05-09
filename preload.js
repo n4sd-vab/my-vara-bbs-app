@@ -1,149 +1,214 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld('vara', {
-    connect: () => ipcRenderer.invoke('vara-connect'),
-    disconnect: () => ipcRenderer.invoke('vara-disconnect'),
-    sendCommand: (line) => ipcRenderer.invoke('vara-send-command', line),
-    sendData: (text) => ipcRenderer.invoke('vara-send-data', text),
+//
+// VARA RADIO API
+//
+contextBridge.exposeInMainWorld("vara", {
+    connect: () => ipcRenderer.invoke("vara-connect"),
+    disconnect: () => ipcRenderer.invoke("vara-disconnect"),
+    sendCommand: (line) => ipcRenderer.invoke("vara-send-command", line),
+    sendData: (text) => ipcRenderer.invoke("vara-send-data", text),
+
     onLog: (callback) => {
         const listener = (_event, data) => callback(data);
-        ipcRenderer.on("log", listener);
-        return listener; // return the actual listener so renderer can remove it
+        ipcRenderer.on("vara:log", listener);
+        return listener;
     },
     removeLogListener: (listener) => {
-        ipcRenderer.removeListener("log", listener);
+        ipcRenderer.removeListener("vara:log", listener);
     }
 });
 
-contextBridge.exposeInMainWorld('settings', {
-    get: () => ipcRenderer.invoke('settings-get'),
-    set: (data) => {
-        ipcRenderer.invoke('settings-set', data);
-        ipcRenderer.send('settings-updated', data);
-    }
+
+//
+// SETTINGS API 
+//
+contextBridge.exposeInMainWorld("settings", {
+    get: () => ipcRenderer.invoke("settings:get"),
+    set: (data) => ipcRenderer.invoke("settings:set", data),
+    saveSetting: (key, value) => ipcRenderer.invoke("settings:save", { key, value }),
+    getSetting: (key) => ipcRenderer.invoke("settings:get-one", key),
+    onUpdated: (callback) =>
+        ipcRenderer.on("settings:updated", (_e, data) => callback(data))
 });
 
+
+//
+// BBS / MESSAGES API
+//
 contextBridge.exposeInMainWorld("electronAPI", {
 
+    //
+    // UI / WINDOW EVENTS
+    //
     onToggleVaraConsole: (callback) =>
-        ipcRenderer.on("toggle-vara-console", (_event, visible) => callback(visible)),
+        ipcRenderer.on("ui:toggle-vara-console", (_e, visible) => callback(visible)),
 
-    showMessageContextMenu: (data) =>
-        ipcRenderer.send("show-message-context-menu", data),
+    onOpenBbsHelp: (callback) =>
+        ipcRenderer.on("ui:open-bbs-help", callback),
 
-    getMessages: () => ipcRenderer.invoke("getMessages"),
+    onOpenAbout: (callback) =>
+        ipcRenderer.on("ui:open-about", callback),
 
-    getMessageById: (id) => ipcRenderer.invoke("getMessageById", id),
+    onToast: (callback) =>
+    ipcRenderer.on("ui:toast", (_e, text) => callback(text)),
 
-    sendToBbs: (cmd) => ipcRenderer.send("send-to-bbs", cmd),
+    //
+    // MESSAGE LIST / DB ACCESS
+    //
+    getMessages: () => ipcRenderer.invoke("messages:get-all"),
+    getMessageById: (id) => ipcRenderer.invoke("messages:get-by-id", id),
+    getMessageByMsgNum: (msgNum) => ipcRenderer.invoke("messages:get-by-msgnum", msgNum),
 
-    deleteMessage: (id) => ipcRenderer.invoke("deleteMessage", id),
+    deleteMessage: (id) => ipcRenderer.invoke("messages:delete", id),
+    markMessageSaved: (id) => ipcRenderer.invoke("messages:mark-saved", id),
+    markMessageRead: (id) => ipcRenderer.invoke("messages:mark-read", id),
 
     onMessageDeleted: (callback) =>
-        ipcRenderer.on("message-deleted", (_e, msgNum) => callback(msgNum)),
-
-    markMessageSaved: (id) => ipcRenderer.invoke("markMessageSaved", id),
+        ipcRenderer.on("messages:deleted", (_e, msgNum) => callback(msgNum)),
 
     onMessageSaved: (callback) =>
-        ipcRenderer.on("message-saved", (_e, msgNum) => callback(msgNum)),
+        ipcRenderer.on("messages:saved", (_e, msgNum) => callback(msgNum)),
 
-    sendBbsState: (state) => ipcRenderer.send("bbs-state", state),
+    onMessageRead: (callback) =>
+        ipcRenderer.on("messages:read", (_e, id) => callback(id)),
 
-    sendOutbox: () => ipcRenderer.invoke("sendOutbox"),
+    onMessagesReceived: (callback) =>
+        ipcRenderer.on("messages:received", (_e, data) => callback(data)),
 
-    sendBbsMessage: (msg) => ipcRenderer.invoke("sendBbsMessage", msg),
 
-    receiveMessages: () => ipcRenderer.invoke('receive-messages'),
+    //
+    // BBS COMMANDS
+    //
+    sendToBbs: (cmd) => ipcRenderer.send("bbs:send-command", cmd),
+    sendReceive: () => ipcRenderer.send("bbs:send-receive"),
+    sendOutbox: () => ipcRenderer.invoke("bbs:send-outbox"),
+    sendBbsMessage: (msg) => ipcRenderer.invoke("bbs:send-message", msg),
 
-    // onReplyToSender: (callback) =>
-    //    ipcRenderer.on("reply-to-sender", (_e, data) => callback(data)),
-
-    saveOutboxMessage: (message) => ipcRenderer.invoke("saveOutboxMessage", message),
-
-    saveMessage: (message) => ipcRenderer.invoke("saveMessage", message),
-
-    sendReceive: () => ipcRenderer.send("sendReceive"),
-
-    replyToMessage: (msgNum) => ipcRenderer.invoke("replyToMessage", msgNum),
-
-    onOpenAddressBookAdd: (callback) =>
-        ipcRenderer.on("open-address-book-add", () => callback()),
-
-    // address book helpers
-    saveAddressBookEntry: (entry) => ipcRenderer.invoke('address-book-save', entry),
-
-    onOpenAddressBookView: (callback) =>
-        ipcRenderer.on("open-address-book-view", () => callback()),
-
-    getAddressBook: () => ipcRenderer.invoke('address-book-get'),
-
-    searchAddressBook: (prefix) => ipcRenderer.invoke("addressbook-search", prefix),
-
-    debugAddressBook: () => ipcRenderer.invoke("addressbook-debug"),
-
-    deleteAddressBookEntry: (id) => ipcRenderer.invoke("addressbook-delete", id),
-
-    getAddressBookEntry: (id) => ipcRenderer.invoke("addressbook-get-one", id),
-
-    updateAddressBookEntry: (entry) => ipcRenderer.invoke("addressbook-update", entry),
-
-    // white pages import
-    startWhitePagesMode: () => ipcRenderer.send('whitepages-start'),
-
-    onOpenWhitePagesModal: (callback) =>
-        ipcRenderer.on("open-whitepages-import", () => callback()),
-
-    onWhitePagesLine: (callback) => ipcRenderer.on("whitepages-line", (_e, entry) => callback(entry)),
-
+    receiveMessages: () => ipcRenderer.invoke("bbs:receive-messages"),
     readMessage: (msgNum) => ipcRenderer.send("bbs:read-message", msgNum),
 
-    markMessageRead: (id) => ipcRenderer.invoke("markMessageRead", id),
+    onMessageBody: (callback) =>
+        ipcRenderer.on("bbs:message-body", (_e, msg) => callback(msg)),
 
-    onMessageBody: (callback) => ipcRenderer.on("bbs:message-body", (event, msg) => callback(msg)),
+    filterBulletins: (category) =>
+        ipcRenderer.send("bbs:filter-bulletins", category),
 
-    onOpenBbsHelp: (callback) => ipcRenderer.on("open-bbs-help", () => callback()),
+    getBulletinCategories: () =>
+        ipcRenderer.invoke("bbs:get-bulletin-categories"),
 
-    onOpenAbout: (callback) => ipcRenderer.on("open-about", () => callback()),
+    onBulletinList: (callback) =>
+        ipcRenderer.on("bbs:bulletin-list", (_e, rows) => callback(rows)),
 
-    startYappReceive: (info) => ipcRenderer.send('start-yapp-receive', info),
 
-    startYappSend: (info) => ipcRenderer.send("yapp-start-send", info),
+    //
+    // CONTEXT MENU
+    //
+    showMessageContextMenu: (template) =>
+        ipcRenderer.send("menu:show-message-context", template),
 
-    onYappSendError: (callback) => ipcRenderer.on("yapp-send-error", callback),
+    createMenu: (template) =>
+        ipcRenderer.send("menu:create", template),
 
-    requestYappFileList: () => ipcRenderer.send('yapp-request-file-list'),
-    onYappFileList: (callback) => ipcRenderer.on('yapp-file-list', (_e, files) => callback(files)),
+    onMenuItemClicked: (callback) =>
+        ipcRenderer.on("menu:item-clicked", (_e, label) => callback(label)),
 
-    pickDirectory: () => ipcRenderer.invoke("pick-directory"),
 
-    saveSetting: (key, value) => ipcRenderer.invoke("save-setting", { key, value }),
-    getSetting: (key) => ipcRenderer.invoke("get-setting", key),
+    //
+    // OUTBOX / SAVED MESSAGES
+    //
+    saveOutboxMessage: (msg) => ipcRenderer.invoke("outbox:save", msg),
+    saveMessage: (msg) => ipcRenderer.invoke("messages:save", msg),
 
-    onOpenYappReceive: (callback) => ipcRenderer.on("open-yapp-receive", () => callback()),
-    onYappRecvProgress: (callback) => ipcRenderer.on("yapp-recv-progress", callback),
-    onYappReceiveComplete: (callback) => ipcRenderer.on("yapp-receive-complete", callback),
 
-    pickFile: () => ipcRenderer.invoke("pick-file"),
-    onOpenYappSend: (callback) => ipcRenderer.on("open-yapp-send", callback),
-    onYappSendComplete: (callback) => ipcRenderer.on("yapp-send-complete", callback),
-    sendYappFile: (filePath) => ipcRenderer.invoke("yapp-send-file", filePath),
+    //
+    // ADDRESS BOOK
+    //
+    saveAddressBookEntry: (entry) =>
+        ipcRenderer.invoke("address-book:save", entry),
+
+    getAddressBook: () =>
+        ipcRenderer.invoke("address-book:get"),
+
+    getAddressBookEntry: (id) =>
+        ipcRenderer.invoke("address-book:get-one", id),
+
+    updateAddressBookEntry: (entry) =>
+        ipcRenderer.invoke("address-book:update", entry),
+
+    deleteAddressBookEntry: (id) =>
+        ipcRenderer.invoke("address-book:delete", id),
+
+    searchAddressBook: (prefix) =>
+        ipcRenderer.invoke("address-book:search", prefix),
+
+    debugAddressBook: () =>
+        ipcRenderer.invoke("address-book:debug"),
+
+    onOpenAddressBookAdd: (callback) =>
+        ipcRenderer.on("address-book:open-add", callback),
+
+    onOpenAddressBookView: (callback) =>
+        ipcRenderer.on("address-book:open-view", callback),
+
+
+    //
+    // WHITE PAGES IMPORT
+    //
+    startWhitePagesMode: () =>
+        ipcRenderer.send("whitepages:start"),
+
+    onOpenWhitePagesModal: (callback) =>
+        ipcRenderer.on("whitepages:open-modal", callback),
+
+    onWhitePagesLine: (callback) =>
+        ipcRenderer.on("whitepages:line", (_e, entry) => callback(entry)),
+
+
+    //
+    // YAPP FILE TRANSFER
+    //
+    startYappReceive: (info) =>
+        ipcRenderer.send("yapp:receive-start", info),
+
+    startYappSend: (info) =>
+        ipcRenderer.send("yapp:send-start", info),
+
+    onYappSendError: (callback) =>
+        ipcRenderer.on("yapp:send-error", callback),
+
+    requestYappFileList: () =>
+        ipcRenderer.send("yapp:request-file-list"),
+
+    onYappFileList: (callback) =>
+        ipcRenderer.on("yapp:file-list", (_e, files) => callback(files)),
+
+    onOpenYappReceive: (callback) =>
+        ipcRenderer.on("yapp:open-receive", callback),
+
+    onYappRecvProgress: (callback) =>
+        ipcRenderer.on("yapp:recv-progress", callback),
+
+    onYappReceiveComplete: (callback) =>
+        ipcRenderer.on("yapp:receive-complete", callback),
+
+    pickDirectory: () =>
+        ipcRenderer.invoke("fs:pick-directory"),
+
+    pickFile: () =>
+        ipcRenderer.invoke("fs:pick-file"),
+
+    onOpenYappSend: (callback) =>
+        ipcRenderer.on("yapp:open-send", callback),
+
+    onYappSendComplete: (callback) =>
+        ipcRenderer.on("yapp:send-complete", callback),
+
+    sendYappFile: (filePath) =>
+        ipcRenderer.invoke("yapp:send-file", filePath),
 
     onYappSendProgress: (callback) =>
-        ipcRenderer.on("yapp-send-progress", (event, data) => callback(data)),
-
-    // popup menu for bulletin list filtering
-    createMenu: (template) => ipcRenderer.send("create-menu", template),
-
-    filterBulletins: (category) => ipcRenderer.send("bbs:filter-bulletins", category),
-
-    getBulletinCategories: () => ipcRenderer.invoke("bbs:get-bulletin-categories"),
-
-    onBulletinList: (callback) => {
-        ipcRenderer.on("bbs:bulletin-list", (event, rows) => callback(rows));
-    },
-
-    onMenuItemClicked: (callback) => {
-        ipcRenderer.on("menu-item-clicked", (event, label) => callback(label));
-    }
+        ipcRenderer.on("yapp:send-progress", (_e, data) => callback(data))
 });
+
 console.log("PRELOAD LOADED");

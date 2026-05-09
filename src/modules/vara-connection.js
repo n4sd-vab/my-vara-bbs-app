@@ -1,0 +1,186 @@
+const net = require('net');
+const { BrowserWindow } = require('electron');
+
+class VaraConnection {
+  constructor(settingsManager, dataCallback = null) {
+    this.settingsManager = settingsManager;
+    this.dataCallback = dataCallback;
+    this.cmdSocket = null;
+    this.dataSocket = null;
+    this.bbsLinkUp = false;
+    this.bbsPromptReady = false;
+    this.cmdBuffer = "";
+    this.dataBuffer = "";
+    this.lineWaiters = [];
+  }
+
+  async connect() {
+    return new Promise((resolve, reject) => {
+      let pending = 2;
+      let hadError = false;
+
+      const done = (err) => {
+        if (err && !hadError) {
+          hadError = true;
+          reject(err);
+        } else {
+          pending--;
+          if (pending === 0 && !hadError) resolve(true);
+        }
+      };
+
+      const settings = this.settingsManager.getSettings();
+
+      // Command socket
+      this.cmdSocket = net.createConnection({ host: settings.varaIP, port: settings.varaCmdPort }, () => {
+        this.logToRenderer('info', `Connected to VARA command port ${settings.varaCmdPort}`);
+        done();
+      });
+
+      this.cmdSocket.on('data', (data) => {
+        this.logToRenderer('cmd', data.toString());
+        this.cmdBuffer += data.toString();
+
+        const parts = this.cmdBuffer.split(/\r\n|\r|\n/);
+
+        // Process all complete lines
+        for (let i = 0; i < parts.length - 1; i++) {
+          const trimmed = parts[i].trim();
+          if (!trimmed) continue;
+
+          if (/^CONNECTED\b/i.test(trimmed)) {
+            this.bbsLinkUp = true;
+            console.log("CMD: Link up");
+          }
+
+          if (/^DISCONNECTED\b/i.test(trimmed)) {
+            this.bbsLinkUp = false;
+            this.bbsPromptReady = false;
+            console.log("CMD: Link down");
+          }
+
+          if (/^WRONG\b/i.test(trimmed)) {
+            console.log("CMD: WRONG (modem error)");
+          }
+        }
+
+        // Save incomplete tail
+        this.cmdBuffer = parts[parts.length - 1];
+      });
+
+      this.cmdSocket.on('error', (err) => {
+        this.logToRenderer('error', `Command socket error: ${err.message}`);
+        done(err);
+      });
+
+      this.cmdSocket.on('close', () => {
+        this.logToRenderer('info', 'Command socket closed');
+      });
+
+      // Data socket
+      this.dataSocket = net.createConnection({ host: settings.varaIP, port: settings.varaDataPort }, () => {
+        this.logToRenderer('info', `Connected to VARA data port ${settings.varaDataPort}`);
+        done();
+      });
+
+      this.dataSocket.on('data', (data) => {
+        // Call the data callback if provided
+        if (this.dataCallback) {
+          this.dataCallback(data);
+        } else {
+          // Fallback: accumulate in buffer
+          this.dataBuffer += data.toString();
+        }
+      });
+
+      this.dataSocket.on('error', (err) => {
+        this.logToRenderer('error', `Data socket error: ${err.message}`);
+        done(err);
+      });
+
+      this.dataSocket.on('close', () => {
+        this.logToRenderer('info', 'Data socket closed');
+      });
+    });
+  }
+
+  disconnect() {
+    if (this.cmdSocket) this.cmdSocket.end();
+    if (this.dataSocket) this.dataSocket.end();
+    this.cmdSocket = null;
+    this.dataSocket = null;
+    this.bbsLinkUp = false;
+    this.bbsPromptReady = false;
+  }
+
+  isConnected() {
+    return this.cmdSocket && !this.cmdSocket.destroyed &&
+           this.dataSocket && !this.dataSocket.destroyed;
+  }
+
+  sendCommand(command) {
+    if (!this.cmdSocket) {
+      throw new Error('Not connected to command port');
+    }
+    this.cmdSocket.write(command.endsWith('\r\n') ? command : command + '\r\n');
+  }
+
+  sendData(data) {
+    if (!this.dataSocket) {
+      throw new Error('Not connected to data port');
+    }
+    this.dataSocket.write(data);
+  }
+
+  sendRawBytes(buffer) {
+    if (!Buffer.isBuffer(buffer)) {
+      buffer = Buffer.from(buffer);
+    }
+    try {
+      this.dataSocket.write(buffer);
+    } catch (err) {
+      console.error("sendRawBytes error:", err);
+    }
+  }
+
+  waitForLine(regex, timeout = 15000) {
+    return new Promise((resolve, reject) => {
+      const waiter = { regex, resolve };
+      this.lineWaiters.push(waiter);
+
+      setTimeout(() => {
+        const idx = this.lineWaiters.indexOf(waiter);
+        if (idx !== -1) this.lineWaiters.splice(idx, 1);
+        reject(new Error(`Timeout waiting for: ${regex}`));
+      }, timeout);
+    });
+  }
+
+  notifyLineListeners(line) {
+    console.log("notifyLineListeners GOT:", JSON.stringify(line));
+    for (let i = this.lineWaiters.length - 1; i >= 0; i--) {
+      const waiter = this.lineWaiters[i];
+      console.log("Testing waiter against line:", waiter.regex, JSON.stringify(line));
+      if (waiter.regex.test(line)) {
+        waiter.resolve(line);
+        this.lineWaiters.splice(i, 1);
+      }
+    }
+  }
+
+  logToRenderer(type, msg) {
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length > 0) {
+      windows[0].webContents.send('vara:log', { type, msg });
+    }
+  }
+
+  getBbsStatus() {
+    return {
+      bbsLinkUp: this.bbsLinkUp,
+      bbsPromptReady: this.bbsPromptReady
+    };
+  }
+}
+
+module.exports = VaraConnection;

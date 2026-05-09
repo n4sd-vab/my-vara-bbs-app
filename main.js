@@ -62,20 +62,20 @@ function saveSettings(settings) {
 
   // Notify renderer of updated settings
   if (mainWindow) {
-    mainWindow.webContents.send("settings-updated", settings);
+    mainWindow.webContents.send("settings:updated", settings);
   }
-  //TODO: consider also sending specific events for important individual settings (e.g., VARA console toggle) instead of a generic "settings-updated"
+  //TODO: consider also sending specific events for important individual settings (e.g., VARA console toggle) instead of a generic "settings:updated"
 }
 
 let settings = loadSettings();
 let appSettings = loadSettings();  // initial load
 
-ipcMain.on("settings-updated", (_event, newSettings) => {
+ipcMain.on("settings:updated", (_event, newSettings) => {
   appSettings = newSettings;
   console.log("Main updated settings:", appSettings);
 });
 
-ipcMain.on("create-menu", (event, template) => {
+ipcMain.on("menu:create", (event, template) => {
   const menu = new Menu();
 
   template.forEach(item => {
@@ -147,19 +147,19 @@ const menuTemplate = [
       {
         label: "Address Book Add",
         click: () => {
-          mainWindow.webContents.send("open-address-book-add");
+          mainWindow.webContents.send("address-book:open-add");
         }
       },
       {
         label: "Address Book View",
         click: () => {
-          mainWindow.webContents.send("open-address-book-view");
+          mainWindow.webContents.send("address-book:open-view");
         }
       },
       {
         label: "WhitePages Import",
         click: () => {
-          mainWindow.webContents.send("open-whitepages-import");
+          mainWindow.webContents.send("whitepages:open-import");
         }
       }
     ]
@@ -175,7 +175,7 @@ const menuTemplate = [
         click: (menuItem) => {
           settings.showVaraConsole = menuItem.checked;
           saveSettings(settings);
-          mainWindow.webContents.send("toggle-vara-console", menuItem.checked);
+          mainWindow.webContents.send("ui:toggle-vara-console", menuItem.checked);
         }
 
       }
@@ -187,13 +187,13 @@ const menuTemplate = [
       {
         label: "Receive File",
         click: () => {
-          mainWindow.webContents.send("open-yapp-receive");
+          mainWindow.webContents.send("yapp:open-receive");
         }
       },
       {
         label: "Send File",
         click: () => {
-          mainWindow.webContents.send("open-yapp-send");
+          mainWindow.webContents.send("yapp:open-send");
         }
       }
     ]
@@ -205,13 +205,13 @@ const menuTemplate = [
       {
         label: "BBS Command Reference",
         click: () => {
-          mainWindow.webContents.send("open-bbs-help");
+          mainWindow.webContents.send("ui:open-bbs-help");
         }
       },
       {
         label: "About",
         click: () => {
-          mainWindow.webContents.send("open-about");
+          mainWindow.webContents.send("ui:open-about");
         }
       }
     ]
@@ -486,7 +486,7 @@ app.on('window-all-closed', () => {
  */
 function logToRenderer(type, msg) {
   if (mainWindow && mainWindow.webContents) {
-    mainWindow.webContents.send('log', { type, msg });
+    mainWindow.webContents.send('vara:log', { type, msg });
   }
 }
 
@@ -519,6 +519,14 @@ function formatBbsLine(line) {
             <span class="msgRow">${subject}</span>
         </div>
     `;
+}
+
+async function ensureVaraConnected() {
+    if (cmdSocket && !cmdSocket.destroyed && dataSocket && !dataSocket.destroyed) {
+        return true; // already connected
+    }
+
+    return await ipcMain.handle("vara-connect")();
 }
 
 function sendConnectCommand() {
@@ -592,30 +600,21 @@ function deleteMessage(msgNum) {
       console.warn("deleteMessage: No messages found with msgNum =", numMsg);
     }
 
-    mainWindow.webContents.send("message-deleted", numMsg);
+    mainWindow.webContents.send("messages:deleted", numMsg);
   } catch (err) {
     console.error("deleteMessage error:", err);
   }
 }
 
-ipcMain.handle("deleteMessage", (_event, msgNum) => {
+ipcMain.handle("messages:delete", (_event, msgNum) => {
   deleteMessage(msgNum);
-});
-
-ipcMain.handle("sendBbsMessage", async (_event, msg) => {
-  await uploadSingleMessage(msg);
-  return true;
 });
 
 function markMessageSaved(msgNum) {
   db.prepare("UPDATE messages SET saved = 1 WHERE msgNum = ?").run(msgNum);
   console.log("Message marked as saved in DB:", msgNum);
-  mainWindow.webContents.send("message-saved", msgNum);
+  mainWindow.webContents.send("messages:saved", msgNum);
 }
-
-ipcMain.handle("markMessageSaved", (_event, msgNum) => {
-  markMessageSaved(msgNum);
-});
 
 
 ipcMain.on("bbs-state", (_event, state) => {
@@ -639,7 +638,7 @@ ipcMain.on("bbs:filter-bulletins", (event, category) => {
 // with timeout and error handling
 async function ensureBbsConnected() {
   if (bbsLinkUp && bbsPromptReady) return true;
-
+  console.log("Ensuring BBS connection... Current state:", { bbsLinkUp, bbsPromptReady });
   // Ask VARA/BPQ to connect
   sendConnectCommand();
 
@@ -661,7 +660,7 @@ async function ensureBbsConnected() {
 
 // -------------------------- OUTBOX SENDING LOGIC -----------------------
 
-ipcMain.handle("sendOutbox", async () => {
+ipcMain.handle("bbs:send-outbox", async () => {
   try {
     await uploadOutboxMessages();
     return true;
@@ -751,10 +750,11 @@ function uploadSingleMessage(msg) {
 
 // ----------------- Start of Retrieve Bulk Messages Logic -----------------------
 
-ipcMain.handle('receive-messages', async () => {
+ipcMain.handle('bbs:receive-messages', async () => {
+  console.log("Received request to receive BBS messages");
     await ensureBbsConnected();
 
-    // FAST SYNC: only get NEW messages
+    // FAST SYNC: only get NEW messages list
     endOfFileList = false;
     messageListMode = "bbs";
     dataSocket.write("L\r");   // NEW messages only
@@ -871,7 +871,7 @@ function handleFileListText(text) {
       console.log("YAPP FILELIST: Final list:", fileList);
 
       inFileList = false;
-      mainWindow.webContents.send("yapp-file-list", fileList);
+      mainWindow.webContents.send("yapp:file-list", fileList);
 
       fileList = [];
       return;
@@ -943,7 +943,7 @@ function updateRecvProgress(received, total) {
     if (mainWindow && mainWindow.webContents) {
       console.log(`YAPP Progress: received ${received} of ${total} bytes (${percent}%)`);
 
-      mainWindow.webContents.send("yapp-recv-progress", { received, total, percent });
+      mainWindow.webContents.send("yapp:recv-progress", { received, total, percent });
     }
   });
 }
@@ -951,7 +951,7 @@ function updateRecvProgress(received, total) {
 function sendProgressToRenderer(sent, total) {
   if (!mainWindow) return;
 
-  mainWindow.webContents.send("yapp-send-progress", {
+  mainWindow.webContents.send("yapp:send-progress", {
     sent,
     total,
     percent: Math.floor((sent / total) * 100)
@@ -960,7 +960,7 @@ function sendProgressToRenderer(sent, total) {
 /**
  * Connect to VARA FM command and data ports
  */
-ipcMain.handle('vara-connect', async () => {
+ipcMain.handle("vara-connect", async () => {
   return new Promise((resolve, reject) => {
     let pending = 2;
     let hadError = false;
@@ -1024,7 +1024,7 @@ ipcMain.handle('vara-connect', async () => {
           const sent = total - remaining;
           const percent = Math.floor((sent / total) * 100);
 
-          mainWindow.webContents.send("yapp-send-progress", {
+          mainWindow.webContents.send("yapp:send-progress", {
             sent,
             total,
             percent
@@ -1090,7 +1090,7 @@ ipcMain.handle('vara-connect', async () => {
           if (/^[A-Z0-9]{3,6}\s+\S+/.test(line)) {
             const entry = parseWhitePagesLine(line);
             whitePagesResults.push(entry);
-            mainWindow.webContents.send("whitepages-line", entry);
+            mainWindow.webContents.send("whitepages:line", entry);
           }
         }
 
@@ -1472,7 +1472,7 @@ function beginYappSendStateMachine(fileName, fileSize, fileBytes) {
 
       logToRenderer("info", `YAPP file send complete: ${name}`);
       if (mainWindow && mainWindow.webContents) {
-        mainWindow.webContents.send("yapp-send-complete");
+        mainWindow.webContents.send("yapp:send-complete");
       }
     } catch (err) {
       console.error("finishSend error:", err);
@@ -1486,7 +1486,7 @@ function beginYappSendStateMachine(fileName, fileSize, fileBytes) {
 
     logToRenderer("error", `YAPP send aborted: ${reason}`);
     if (mainWindow && mainWindow.webContents) {
-      mainWindow.webContents.send("yapp-send-error", { message: reason });
+      mainWindow.webContents.send("yapp:send-error", { message: reason });
     }
   }
 }
@@ -1576,7 +1576,7 @@ class YappReceiver {
 
           console.log("YAPP session complete - returning to normal mode");
           inYapp = false;
-          mainWindow.webContents.send("yapp-receive-complete");
+          mainWindow.webContents.send("yapp:receive-complete");
           this.state = "IDLE";
         }
         else if (b === 0x01) {     // SI
@@ -1725,7 +1725,7 @@ class YappReceiver {
 /**
  * Send a command line to VARA command port
  */
-ipcMain.handle('vara-send-command', async (_event, line) => {
+ipcMain.handle("vara-send-command", async (_event, line) => {
   if (!cmdSocket) {
     throw new Error('Not connected to command port');
   }
@@ -1735,50 +1735,77 @@ ipcMain.handle('vara-send-command', async (_event, line) => {
 /**
  * Send data (e.g., email text) to VARA data port
  */
-ipcMain.handle('vara-send-data', async (_event, text) => {
+ipcMain.handle("vara-send-data", async (_event, text) => {
   if (!dataSocket) {
     throw new Error('Not connected to data port');
   }
   dataSocket.write(text);
 });
 
-ipcMain.handle('vara-disconnect', async () => {
+ipcMain.handle("vara-disconnect", async () => {
   if (cmdSocket) cmdSocket.end();
   if (dataSocket) dataSocket.end();
 });
 
-ipcMain.handle("settings-get", async () => {
+ipcMain.handle("settings:get", async () => {
   return loadSettings();
 });
 
-ipcMain.handle("settings-set", async (_event, data) => {
+ipcMain.handle("settings:set", async (_event, data) => {
   const settings = loadSettings();
   const newSettings = { ...settings, ...data };
   fs.writeFileSync(settingsPath, JSON.stringify(newSettings, null, 2));
 });
 
-ipcMain.handle("get-setting", async (_event, key) => {
+ipcMain.handle("settings:get-one", async (_event, key) => {
   const settings = loadSettings();   // load fresh copy
   return settings[key];
 });
 
-ipcMain.handle("save-setting", async (_event, { key, value }) => {
+ipcMain.handle("settings:save", async (_event, { key, value }) => {
   const settings = loadSettings();
   settings[key] = value;
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 });
 
-ipcMain.handle("getMessages", () => {
+ipcMain.handle("messages:get-all", () => {
   return db.prepare("SELECT * FROM messages WHERE deleted=0").all();
 });
 
-ipcMain.handle("getMessageById", (event, id) => {
+ipcMain.handle("messages:get-by-id", (event, id) => {
   return db.prepare("SELECT * FROM messages WHERE id=?").get(id);
 });
 
-ipcMain.handle("markMessageRead", (event, id) => {
+ipcMain.handle("messages:get-by-msgnum", (event, msgNum) => {
+  return db.prepare("SELECT * FROM messages WHERE msgNum=?").get(msgNum);
+});
+
+ipcMain.handle("messages:mark-read", (event, id) => {
   db.prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
 });
+
+ipcMain.handle("messages:mark-saved", (_event, msgNum) => {
+  markMessageSaved(msgNum);
+});
+
+ipcMain.handle("outbox:save", (_event, message) => {
+  return saveOutboxMessage(message);
+});
+
+ipcMain.handle("bbs:send-message", async (_event, msg) => {
+  await uploadSingleMessage(msg);
+  return true;
+});
+
+/* ipcMain.handle("bbs:receive-messages", async () => {
+  await ensureVaraConnected();
+  await ensureBbsConnected();
+  await uploadOutboxMessages();
+  // Trigger LIST mode
+  dataSocket.write("L\r");
+
+  return true;
+}); */
 
 ipcMain.handle("bbs:get-bulletin-categories", () => {
   const rows = db.prepare(`
@@ -1823,7 +1850,7 @@ ipcMain.on("bbs:read-message", (event, msgNum) => {
   if (dataSocket) dataSocket.write(`R ${msgNum}\r`);
 });
 
-ipcMain.on("send-to-bbs", (event, cmd) => {
+ipcMain.on("bbs:send-command", (event, cmd) => {
   console.log("MAIN: sending to DATA port:", cmd);
   console.log("Sending BBS command:", cmd, "via DATA socket");
   if (cmd.startsWith("L")) {
@@ -1833,7 +1860,7 @@ ipcMain.on("send-to-bbs", (event, cmd) => {
   if (dataSocket) dataSocket.write(cmd + "\r");
 });
 
-/* ipcMain.on("show-message-context-menu", (event, data) => {
+ipcMain.on("menu:show-message-context", (event, data) => {
   const menu = new Menu();
 
   menu.append(new MenuItem({
@@ -1844,33 +1871,32 @@ ipcMain.on("send-to-bbs", (event, cmd) => {
   }));
 
   menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
-}); */
+});
 
 
-
-
-
-ipcMain.handle("sendReceive", async () => {
+ipcMain.handle("bbs:send-receive", async () => {
   await ensureVaraConnected();
   await ensureBbsConnected();
   await uploadOutboxMessages();
-  await requestMessageList();
-  // main.js already handles LIST/READ
+
+  // Trigger LIST mode
+  dataSocket.write("L\r");
+
   return true;
 });
 
 
-ipcMain.handle("replyToMessage", (_event, msgNum) => {
+ipcMain.handle("messages:reply-to", (_event, msgNum) => {
   const msg = db.prepare("SELECT * FROM messages WHERE msgNum = ?").get(msgNum);
   return msg;
 });
 
 
-ipcMain.handle("saveOutboxMessage", (_event, message) => {
+ipcMain.handle("messages:save-outbox", (_event, message) => {
   return saveOutboxMessage(message);
 });
 
-ipcMain.handle("saveMessage", (_event, message) => {
+ipcMain.handle("messages:save", (_event, message) => {
   return saveMessage(message);
 });
 
@@ -1884,7 +1910,7 @@ ipcMain.on('whitepages-start', () => {
   whitePagesResults = [];
 });
 
-ipcMain.on('start-yapp-receive', async (event, info) => {
+ipcMain.on('yapp:receive-start', async (event, info) => {
   const { filename, directory } = info;
 
   try {
@@ -1920,7 +1946,7 @@ ipcMain.on("yapp-request-file-list", () => {
   }
 });
 
-ipcMain.handle('address-book-save', (_event, entry) => {
+ipcMain.handle('address-book:save', (_event, entry) => {
 
   if (entry.preserveNotes) {
     // WP import: do NOT overwrite notes
@@ -1950,22 +1976,27 @@ ipcMain.handle('address-book-save', (_event, entry) => {
   return { success: true, entry };
 });
 
-ipcMain.handle('address-book-get', () => {
+ipcMain.handle('address-book:get', () => {
   const stmt = db.prepare(`SELECT * FROM address_book ORDER BY callsign`);
   return stmt.all();
 });
 
-ipcMain.handle("addressbook-delete", (event, id) => {
+ipcMain.handle("address-book:delete", (event, id) => {
   db.prepare("DELETE FROM address_book WHERE id = ?").run(id);
   return { success: true, id };
 });
 
-ipcMain.handle("addressbook-get-one", (event, id) => {
+ipcMain.handle("address-book:get-one", (event, id) => {
   return db.prepare("SELECT * FROM address_book WHERE id = ?").get(id);
 });
 
+ipcMain.handle("address-book:search", (event, prefix) => {
+  const query = `${prefix}%`;
+  return db.prepare("SELECT * FROM address_book WHERE callsign LIKE ? OR name LIKE ? ORDER BY callsign").all(query, query);
+});
+
 // Note: this uses the same 'save' logic as add, but requires the ID to be present in the entry
-ipcMain.handle("addressbook-update", (event, entry) => {
+ipcMain.handle("address-book:update", (event, entry) => {
   db.prepare(`
     UPDATE address_book
     SET callsign=@callsign,
@@ -2018,7 +2049,7 @@ ipcMain.handle("buffer-concat", (_e, list) => {
 // then initiates the YAPP send state machine.
 // ----------------------------------------------------------//
 
-ipcMain.on("yapp-start-send", (event, info) => {
+ipcMain.on("yapp:send-start", (event, info) => {
   //inYappSend = true;
   setInYappSend(true);
   yappSend = null;
@@ -2053,7 +2084,7 @@ ipcMain.handle("yapp-send-file", async (_event, filePath) => {
 
 console.log("DB Path:", dbPath);
 
-ipcMain.handle("addressbook-debug", () => {
+ipcMain.handle("address-book:debug", () => {
   return db.prepare("SELECT * FROM address_book").all();
 });
 //----------------------END OF YAPP SEND LOGIC----------------------//
