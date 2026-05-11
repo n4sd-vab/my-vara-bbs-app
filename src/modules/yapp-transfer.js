@@ -21,7 +21,11 @@ class YappTransfer {
       this.varaConnection.sendData(`YAPP ${filename}\r`);
 
       // 2. Create the YAPP receiver
-      this.yappReceiver = new YappReceiver(this.varaConnection.sendRawBytes.bind(this.varaConnection), directory);
+      this.yappReceiver = new YappReceiver(
+        this.varaConnection.sendRawBytes.bind(this.varaConnection),
+        directory,
+        this.settingsManager
+      );
 
       this.inYapp = true;
       console.log("YAPP receive started for:", filename);
@@ -305,6 +309,9 @@ class YappTransfer {
         return;
       }
       this.yappReceiver.feed(data);
+      if (this.yappReceiver.state === 'IDLE') {
+        this.inYapp = false;
+      }
       return;
     }
 
@@ -369,9 +376,10 @@ function buildYappDataBlock(chunk, isFinal) {
 
 // YAPP Receiver Class
 class YappReceiver {
-  constructor(sendFn, saveDirectory) {
+  constructor(sendFn, saveDirectory, settingsManager) {
     this.send = sendFn;
     this.dir = saveDirectory;
+    this.settingsManager = settingsManager;
     this.state = "WAIT_SI";
     this.buffer = [];
     this.file = null;
@@ -525,9 +533,11 @@ class YappReceiver {
       return false;
     }
 
-    const settings = this.settingsManager.getSettings();
-    const receiveDir = settings.yappReceiveDir || path.join(require('electron').app.getPath("documents"), "YAPP");
+    const settings = this.settingsManager ? this.settingsManager.getSettings() : {};
+    const defaultDir = path.join(require('electron').app.getPath("documents"), "YAPP");
+    const receiveDir = this.dir || settings.yappReceiveDir || defaultDir;
 
+    fs.mkdirSync(receiveDir, { recursive: true });
     const filePath = path.join(receiveDir, this.filename);
 
     console.log("Opening file:", filePath);

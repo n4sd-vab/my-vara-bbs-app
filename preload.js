@@ -117,7 +117,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     //
     // OUTBOX / SAVED MESSAGES
     //
-    saveOutboxMessage: (msg) => ipcRenderer.invoke("outbox:save", msg),
+    saveOutboxMessage: (msg) => ipcRenderer.invoke("messages:save-outbox", msg),
     saveMessage: (msg) => ipcRenderer.invoke("messages:save", msg),
 
 

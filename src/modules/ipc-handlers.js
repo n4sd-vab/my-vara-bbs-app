@@ -192,7 +192,7 @@ class IpcHandlers {
       this.yappTransfer.startReceive(filename, directory);
     });
 
-    ipcMain.on("yapp-request-file-list", () => {
+    ipcMain.on("yapp:request-file-list", () => {
       this.yappTransfer.requestFileList();
     });
 
@@ -201,7 +201,7 @@ class IpcHandlers {
       this.yappTransfer.startSend(fileName, fileSize, fileBytes);
     });
 
-    ipcMain.handle("yapp-send-file", async (_event, filePath) => {
+    ipcMain.handle("yapp:send-file", async (_event, filePath) => {
       try {
         const data = await fs.promises.readFile(filePath);
         return data;
@@ -212,14 +212,14 @@ class IpcHandlers {
     });
 
     // Dialog handlers
-    ipcMain.handle("pick-directory", async () => {
+    const pickDirectoryHandler = async () => {
       const result = await dialog.showOpenDialog({
         properties: ["openDirectory"]
       });
       return result.canceled ? null : result.filePaths[0];
-    });
+    };
 
-    ipcMain.handle("pick-file", async () => {
+    const pickFileHandler = async () => {
       const result = await dialog.showOpenDialog({
         properties: ["openFile"]
       });
@@ -229,7 +229,13 @@ class IpcHandlers {
       }
 
       return result.filePaths[0];
-    });
+    };
+
+    ipcMain.handle("pick-directory", pickDirectoryHandler);
+    ipcMain.handle("fs:pick-directory", pickDirectoryHandler);
+
+    ipcMain.handle("pick-file", pickFileHandler);
+    ipcMain.handle("fs:pick-file", pickFileHandler);
 
     // Buffer utilities
     ipcMain.handle("buffer-alloc", (_e, size) => {
