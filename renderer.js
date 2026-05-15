@@ -538,7 +538,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         disconnectBbsBtn.disabled = !connected;
 
         connectBbsBtn.disabled = !connected;
-        /*     listMineBtn.disabled = !connected;
+        /*  listMineBtn.disabled = !connected;
             listBullBtn.disabled = !connected;
             listWxBtn.disabled = !connected;
             listNewBtn.disabled = !connected; */
@@ -1272,6 +1272,21 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    let varaConnected = false;
+
+    async function connectToVara() {
+        if (varaConnected) return;
+
+        try {
+            await window.vara.connect();
+            appendCommand('info', 'Connect requested');
+            // whatever else you do on successful connect
+        } catch (err) {
+            appendCommand('error', 'Connect failed: ' + err.message);
+        }
+    }
+
+
     /*     connectBtn.addEventListener('click', async () => {
             try {
                 await window.vara.connect();
@@ -1281,20 +1296,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         }); */
 
-    connectBtn.addEventListener('click', connectToVara);
-
-/*     document.addEventListener("DOMContentLoaded", () => {
-        connectToVara();   // auto-connect on startup
-    }); */
-
-    async function connectToVara() {
-        try {
-            await window.vara.connect();
-            appendCommand('info', 'Connect requested');
-        } catch (err) {
-            appendCommand('error', 'Connect failed: ' + err.message);
-        }
-    }
+    // connectBtn.addEventListener('click', connectToVara);
 
     // Command input (Enter to send)
     commandInput.addEventListener('keydown', async (e) => {
@@ -1428,6 +1430,22 @@ window.addEventListener('DOMContentLoaded', async () => {
              appendCommand('error', 'List New failed: ' + err.message);
          }
      }); */
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // Cache elements, set initial UI
+        setConnectedUI(false);
+
+        // Register VARA line listener BEFORE connecting
+        window.vara.onLine((type, line) => {
+            handleVaraLine(type, line);
+        });
+
+        // Button wiring
+        connectBtn.addEventListener('click', connectToVara);
+
+        // Auto-connect once everything above is ready
+        connectToVara();
+    });
 
     document.getElementById("sendBtn").addEventListener("click", () => {
         window.electronAPI.sendOutbox();
@@ -1607,5 +1625,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Initialize message list with private messages
     renderMessageList();
 
+    connectToVara(); // Start connection immediately
+
 });
 console.log("RENDERER LOADED");
+
