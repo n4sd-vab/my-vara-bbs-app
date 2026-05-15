@@ -162,6 +162,7 @@ function createPreferencesWindow() {
 // App event handlers
 app.whenReady().then(() => {
   createWindow();
+  // varaConnection.connect();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

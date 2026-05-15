@@ -1272,14 +1272,29 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    connectBtn.addEventListener('click', async () => {
+    /*     connectBtn.addEventListener('click', async () => {
+            try {
+                await window.vara.connect();
+                appendCommand('info', 'Connect requested');
+            } catch (err) {
+                appendCommand('error', 'Connect failed: ' + err.message);
+            }
+        }); */
+
+    connectBtn.addEventListener('click', connectToVara);
+
+/*     document.addEventListener("DOMContentLoaded", () => {
+        connectToVara();   // auto-connect on startup
+    }); */
+
+    async function connectToVara() {
         try {
             await window.vara.connect();
             appendCommand('info', 'Connect requested');
         } catch (err) {
             appendCommand('error', 'Connect failed: ' + err.message);
         }
-    });
+    }
 
     // Command input (Enter to send)
     commandInput.addEventListener('keydown', async (e) => {
