@@ -60,13 +60,17 @@ class IpcHandlers {
       return this.database.getMessageByMsgNum(msgNum);
     });
 
+    ipcMain.handle("messages:mark-download", (event, msgNum) => {
+      this.database.markMessageDownloaded(msgNum);
+    });
+
     ipcMain.handle("messages:mark-read", (event, id) => {
       this.database.markMessageRead(id);
       this.sendToRenderer("messages:read", id);
     });
 
-    ipcMain.handle("messages:mark-saved", (_event, msgNum) => {
-      this.database.markMessageSaved(msgNum);
+    ipcMain.handle("messages:mark-archived", (_event, msgNum) => {
+      this.database.markMessageArchived(msgNum);
     });
 
     ipcMain.handle("messages:delete", (_event, msgNum) => {
@@ -88,10 +92,9 @@ class IpcHandlers {
       return this.database.saveMessage(message);
     });
 
-    // BBS protocol handlers
-    // ipcMain.handle('receive-messages', async () => {
-    //   return await this.bbsProtocol.receiveMessages();
-    // });
+    ipcMain.handle("messages:archive", (_event, msgNum) => {
+      this.database.markMessageArchived(msgNum);
+    });
 
     ipcMain.handle('full-sync', async () => {
       return await this.bbsProtocol.fullSync();
@@ -114,6 +117,8 @@ class IpcHandlers {
 
     ipcMain.handle("bbs:receive-messages", async () => {
       console.log("IPC: bbs:receive-messages invoked");
+      const subs = this.settings.getSetting("subscriptions") || [];
+      this.bbsProtocol.setSubscriptions(subs);
       return await this.bbsProtocol.receiveMessages();
     });
 

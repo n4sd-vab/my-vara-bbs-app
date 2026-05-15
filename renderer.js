@@ -93,6 +93,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const wpImportBtn = document.getElementById('wpImportBtn');
 
     const listPanel = document.getElementById("messageTabs");
+    const bulletinTab = document.querySelector('.msg-tab[data-tab="bulletin"]');
 
     console.log("Loaded settings:", appSettings);
 
@@ -245,8 +246,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 // Update styling
-                row.classList.remove("unread");
-                row.classList.add("read");
+                row.dataset.read = "1";     // update read state
+                //row.classList.remove("data-read=0");
+                //row.classList.add("data-read=1");
 
                 // Track which message is currently displayed
                 currentDisplayedMsgNum = msg.msgNum;
@@ -266,8 +268,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                 // Render into right pane
                 const viewer = document.getElementById("msgView");
                 viewer.innerHTML = `<pre>${msg.body || "(Fetching message...)"}</pre>`;
-                row.classList.add("data-read=1");
-                row.classList.remove("data-read=0");
+                row.dataset.read = "1";     // update read state
+                //row.classList.remove("data-read=0");
+                //row.classList.add("data-read=1");
             });
 
             // RIGHT CLICK = context menu
@@ -320,8 +323,8 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
 
             if (action === "archive") {
-                await window.electronAPI.markMessageSaved(msg.msgNum);
-                row.classList.add("saved");
+                await window.electronAPI.markMessageArchived(msg.msgNum);
+                row.classList.add("archived");
                 row.remove();
             }
 
@@ -373,11 +376,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         // ⭐ Filter based on current tab
         let filtered = messages.filter(m => {
-            if (currentMessageTab === "private") return m.type === "private" && !m.deleted;
-            if (currentMessageTab === "bulletin") return m.type === "bulletin" && !m.deleted;
+            if (currentMessageTab === "private") return m.type === "private" && !m.deleted && m.archived === 0;
+            if (currentMessageTab === "bulletin") return m.type === "bulletin" && !m.deleted && m.archived === 0;
             if (currentMessageTab === "sent") return m.sent === 1 && !m.deleted;
             if (currentMessageTab === "outbox") return m.outbox === 1 && !m.deleted;
-            if (currentMessageTab === "saved") return m.saved === 1 && !m.deleted;
+            if (currentMessageTab === "archived") return m.archived === 1 && !m.deleted;
             if (currentMessageTab === "user1") return m.type === "user1" && !m.deleted;
             if (currentMessageTab === "user2") return m.type === "user2" && !m.deleted;
             return false;
@@ -405,6 +408,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     `).join("");
 
         attachMessageRowHandlers();
+    }
+
+
+    function updateMessageRow(msgNum) {
+        const row = document.querySelector(`.msg-row[data-msgnum="${msgNum}"]`);
+        if (!row) return;
+        console.log("Updating message row for msgNum:", msgNum, "row found:", !!row);
+        row.dataset.read = "1";     // update read state
     }
 
     function formatListRow(m) {
@@ -510,7 +521,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     async function sendBbsCommand(cmd) {
         await ensureBbsConnected();
-        if (cmd.startsWith("L")) {
+        if (cmd.startsWith("L ") || cmd.startsWith("LB") || cmd.startsWith("LP")) {
             messageListMode = "bbs";
             const messageList = document.getElementById("messageList");
             messageList.innerHTML = ""; // clear previous content
@@ -527,10 +538,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         disconnectBbsBtn.disabled = !connected;
 
         connectBbsBtn.disabled = !connected;
-    /*     listMineBtn.disabled = !connected;
-        listBullBtn.disabled = !connected;
-        listWxBtn.disabled = !connected;
-        listNewBtn.disabled = !connected; */
+        /*     listMineBtn.disabled = !connected;
+            listBullBtn.disabled = !connected;
+            listWxBtn.disabled = !connected;
+            listNewBtn.disabled = !connected; */
         addressBookBtn.disabled = !connected;
         composeMsgBtn.disabled = !connected;
         sendBtn.disabled = !connected;
@@ -897,6 +908,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
 
         window.showToast(`Message #${msg.msgNum} downloaded`);
+        updateMessageRow(msg.msgNum);
 
         let fullMsg = null;
         const start = Date.now();
@@ -925,25 +937,53 @@ window.addEventListener('DOMContentLoaded', async () => {
         renderMessageList();
     });
 
-    window.electronAPI.onMessageSaved((msgNum) => {
-        console.log("Message saved, refreshing list:", msgNum);
+    window.electronAPI.onMessageArchived((msgNum) => {
+        console.log("Message archived, refreshing list:", msgNum);
+        renderMessageList();
+    });
+
+    window.electronAPI.onMessageDownloaded((msgNum) => {
+        console.log("Message downloaded, refreshing list:", msgNum);
         renderMessageList();
     });
 
     window.electronAPI.onMessageRead((id) => {
         console.log("Message marked as read, refreshing list:", id);
-        renderMessageList();
+        updateMessageRow(id);
+        //renderMessageList();
     });
 
     window.electronAPI.onMessagesReceived((data) => {
         console.log("Messages received, refreshing list:", data);
         renderMessageList();
+        //updateMessageRow(msg.msgNum);
     });
 
     window.electronAPI.onMenuItemClicked((label) => {
         if (label === "Filter by Category") {
             showCategoryPopup();
         }
+    });
+
+    /*     window.electronAPI.onClearMessageView(() => {
+            document.getElementById("messageBody").textContent = "";
+        });
+    
+        window.electronAPI.onCommandOutput((line) => {
+            const body = document.getElementById("messageBody");
+            body.textContent += line + "\n";
+        }); */
+
+    // Clear the right-hand message pane
+    window.electronAPI.onClearMessageView(() => {
+        const body = document.getElementById("msgView");
+        if (body) body.textContent = "";
+    });
+
+    // Append command output
+    window.electronAPI.onCommandOutput((line) => {
+        const body = document.getElementById("msgView");
+        if (body) body.textContent += line + "\n";
     });
 
     document.getElementById("yappModalDirButton").addEventListener("click", async () => {
@@ -1319,65 +1359,60 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
-    listPanel.addEventListener("contextmenu", (ev) => {
-        if (currentMessageTab !== "bulletin") return;
-
-        ev.preventDefault();
-
-        window.electronAPI.createMenu([
-            {
-                label: "Filter by Category"
-            }
-        ]);
-    });
+    if (bulletinTab) {
+        bulletinTab.addEventListener("contextmenu", (ev) => {
+            ev.preventDefault();
+            showCategoryPopup();
+        });
+    }
 
 
-       /*  addressBookBtn.addEventListener('click', () => {
-            window.electronAPI.openAddressBookAdd();
-        }); */
+    /*  addressBookBtn.addEventListener('click', () => {
+         window.electronAPI.openAddressBookAdd();
+     }); */
 
     // List Mine (LM) updated to use sendBbsCommand helper which ensures BBS connection and routes through main process
 
-   /*  listMineBtn.addEventListener("click", async () => {
-        // clearMessageWindows();
-        appendCommand("local", "TX: LM");
-        try {
-            await sendBbsCommand("LM");
-        } catch (err) {
-            appendCommand("error", "List Mine failed: " + err.message);
-        }
-    });
-
-    listBullBtn.addEventListener('click', async () => {
-        // clearMessageWindows();
-        appendCommand('local', 'TX: LB');
-        try {
-            await sendBbsCommand("LB");
-        } catch (err) {
-            appendCommand('error', 'List Bulletins failed: ' + err.message);
-        }
-    });
-
-    listWxBtn.addEventListener('click', async () => {
-        // clearMessageWindows();
-        appendCommand('local', 'TX: LW');
-        try {
-            await sendBbsCommand("L> WX");
-        } catch (err) {
-            appendCommand('error', 'List Weather failed: ' + err.message);
-        }
-    });
-
-    // List All (L)
-    listNewBtn.addEventListener('click', async () => {
-        //clearMessageWindows();
-        appendCommand('local', 'TX: L');
-        try {
-            await sendBbsCommand("L");
-        } catch (err) {
-            appendCommand('error', 'List New failed: ' + err.message);
-        }
-    }); */
+    /*  listMineBtn.addEventListener("click", async () => {
+         // clearMessageWindows();
+         appendCommand("local", "TX: LM");
+         try {
+             await sendBbsCommand("LM");
+         } catch (err) {
+             appendCommand("error", "List Mine failed: " + err.message);
+         }
+     });
+ 
+     listBullBtn.addEventListener('click', async () => {
+         // clearMessageWindows();
+         appendCommand('local', 'TX: LB');
+         try {
+             await sendBbsCommand("LB");
+         } catch (err) {
+             appendCommand('error', 'List Bulletins failed: ' + err.message);
+         }
+     });
+ 
+     listWxBtn.addEventListener('click', async () => {
+         // clearMessageWindows();
+         appendCommand('local', 'TX: LW');
+         try {
+             await sendBbsCommand("L> WX");
+         } catch (err) {
+             appendCommand('error', 'List Weather failed: ' + err.message);
+         }
+     });
+ 
+     // List All (L)
+     listNewBtn.addEventListener('click', async () => {
+         //clearMessageWindows();
+         appendCommand('local', 'TX: L');
+         try {
+             await sendBbsCommand("L");
+         } catch (err) {
+             appendCommand('error', 'List New failed: ' + err.message);
+         }
+     }); */
 
     document.getElementById("sendBtn").addEventListener("click", () => {
         window.electronAPI.sendOutbox();

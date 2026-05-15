@@ -2,10 +2,11 @@ const { BrowserWindow } = require('electron');
 const { parseListLine, createDateString } = require('../utils/parsers');
 
 class BbsProtocol {
-  constructor(varaConnection, databaseManager, yappTransfer) {
+  constructor(varaConnection, databaseManager, yappTransfer, mainWindow) {
     this.varaConnection = varaConnection;
     this.database = databaseManager;
     this.yappTransfer = yappTransfer;
+    this.mainWindow = mainWindow;
 
     // State variables
     this.messageListMode = "local";
@@ -19,6 +20,12 @@ class BbsProtocol {
     this.whitePagesMode = false;
     this.whitePagesResults = [];
     this.wpBuffer = "";
+    this.subscriptions = [];
+  }
+
+  setSubscriptions(list) {
+    this.subscriptions = list;
+    console.log("BBS Protocol: Subscriptions updated:", this.subscriptions);
   }
 
   // Connection and status
@@ -89,9 +96,12 @@ class BbsProtocol {
     const rows = this.database.getPrivateMessagesForDownload();
     const toDownload = rows.map(r => r.msgNum);
 
+    console.log("Messages to download:", toDownload);
+
     if (toDownload.length > 0) {
       this.endOfReadMode = false;
       this.varaConnection.sendData("R " + toDownload.join(" ") + "\r");
+      this.inReadMode = true;
       await this.waitForReadModeToFinish();
     }
 
@@ -203,6 +213,8 @@ class BbsProtocol {
     this.currentReadBody = [];
     this.readBuffer = "";
 
+    console.log("Entering READ MODE for message", msgNum);
+
     this.inReadMode = true;
     if (this.varaConnection.dataSocket) {
       this.varaConnection.sendData(`R ${msgNum}\r`);
@@ -211,6 +223,8 @@ class BbsProtocol {
 
   finishReadMode() {
     if (!this.inReadMode) return;
+
+    console.log("Finishing READ MODE for message", this.currentReadMsgNum);
 
     this.inReadMode = false;
 
@@ -230,16 +244,32 @@ class BbsProtocol {
     this.readBuffer = "";
   }
 
-  // Send command
+  // Send command: Onlyused for Direct BBS Command Entry in the UI
   sendCommand(cmd) {
-    console.log("MAIN: sending to DATA port:", cmd);
-    if (cmd.startsWith("L")) {
-      this.messageListMode = "bbs";
-      this.listBuffer = "";
-    }
+    console.log("MAIN: manual command:", cmd);
+
+    this.inReadMode = false;
+    this.messageListMode = "none";
+    this.currentReadBody = [];
+    this.listBuffer = "";
+
+    this.sendToRenderer("bbs:clear-message-view");
+    this.sendToRenderer("bbs:command-output", cmd + "\r");
+
+    this.commandMode = true;
+
     if (this.varaConnection.dataSocket) {
       this.varaConnection.sendData(cmd + "\r");
     }
+  }
+
+  downloadBulletin(msgNum) {
+    this.inReadMode = true;
+    this.commandMode = false;
+    this.currentReadMsgNum = msgNum;
+    this.currentReadBody = [];
+
+    this.varaConnection.sendData(`R ${msgNum}\r`);
   }
 
   // WhitePages handling
@@ -281,6 +311,16 @@ class BbsProtocol {
     // Read mode
     if (this.inReadMode) {
       this.processReadModeData(data);
+      return;
+    }
+
+    if (this.commandMode) {
+      let text = data.toString();
+
+      // Convert CR to CRLF
+      text = text.replace(/\r/g, "\r\n");
+
+      this.sendToRenderer("bbs:command-output", text);
       return;
     }
 
@@ -338,7 +378,17 @@ class BbsProtocol {
       if (msgListPattern.test(line)) {
         const parsed = parseListLine(line);
         this.database.upsertMessageListEntry(parsed);
+
         console.log("Line added to database:", parsed);
+
+        // ⭐ Auto-download subscribed bulletins
+        if (parsed.type === "bulletin" &&
+          this.subscriptions.includes(parsed.recipient)) {
+
+          console.log("Auto-downloading subscribed bulletin:", parsed.msgNum);
+          this.downloadBulletin(parsed.msgNum);
+        }
+
       }
     }
 
@@ -348,6 +398,8 @@ class BbsProtocol {
   processReadModeData(data) {
     const text = data.toString();
     this.readBuffer += text;
+
+    console.log("READ MODE: received data chunk, length =", text.length);
 
     const parts = this.readBuffer.split('\r');
 

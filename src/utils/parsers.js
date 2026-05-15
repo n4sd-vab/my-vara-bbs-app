@@ -66,10 +66,12 @@ function parseListLine(line) {
   }
 
   const type = typeCode.startsWith("B") ? "bulletin" : "private";
+  const datePosted = convertListDate(date);
 
   return {
     msgNum,
     date,
+    datePosted,
     typeCode,
     type,
     size,
@@ -117,9 +119,39 @@ function createDateString() {
   return formatter.format(date).replace(' ', '-');
 }
 
+function convertListDate(ddmmm) {
+    const [dd, mon] = ddmmm.split("-");
+    const monthMap = {
+        Jan:"01", Feb:"02", Mar:"03", Apr:"04", May:"05", Jun:"06",
+        Jul:"07", Aug:"08", Sep:"09", Oct:"10", Nov:"11", Dec:"12"
+    };
+
+    const mm = monthMap[mon];
+    const now = new Date();
+    let yyyy = now.getFullYear();
+
+    // Handle year rollover (Dec → Jan)
+    const listMonth = parseInt(mm, 10);
+    const currentMonth = now.getMonth() + 1;
+
+    if (listMonth > currentMonth + 1) {
+        yyyy -= 1; // message is from last year
+    }
+
+    return `${yyyy}-${mm}-${dd} 00:00Z`;
+}
+
+function convertHeaderDate(dateStr, timeStr) {
+    const [mm, dd, yy] = dateStr.split("/");
+    const yyyy = (yy < 70 ? "20" : "19") + yy;
+    return `${yyyy}-${mm}-${dd} ${timeStr}Z`;
+}
+
 module.exports = {
   parseWhitePagesLine,
   parseListLine,
   formatBbsLine,
-  createDateString
-};
+  createDateString,
+  convertListDate,
+  convertHeaderDate
+}

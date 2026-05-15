@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, MenuItem } = require('electron');
+const { app, BrowserWindow, Menu, MenuItem} = require('electron');
 const path = require('path');
 
 // Import our modules
@@ -55,9 +55,14 @@ const menuTemplate = [
         click: () => {
           mainWindow.webContents.send("whitepages:open-modal");
         }
+      },
+      {
+        label: "Sync Bulletin List",
+        click: () => {
+          bbsProtocol.fullSync();
+        }
       }
     ]
-
   },
   {
     label: "View",

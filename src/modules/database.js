@@ -15,6 +15,7 @@ class DatabaseManager {
         id INTEGER PRIMARY KEY,
         msgNum INTEGER,
         date TEXT,
+        datePosted TEXT,
         typeCode TEXT,
         type TEXT,
         size INTEGER,
@@ -23,8 +24,9 @@ class DatabaseManager {
         sender TEXT,
         subject TEXT,
         body TEXT,
+        downloaded INTEGER DEFAULT 0,
         read INTEGER DEFAULT 0,
-        saved INTEGER DEFAULT 0,
+        archived INTEGER DEFAULT 0,
         deleted INTEGER DEFAULT 0,
         outbox INTEGER DEFAULT 0,
         sent INTEGER DEFAULT 0,
@@ -59,8 +61,8 @@ class DatabaseManager {
   // Message operations
   upsertMessageListEntry(msg) {
     const stmt = this.db.prepare(`
-      INSERT INTO messages (msgNum, date, typeCode, type, size, recipient, at, sender, subject, read, saved, deleted)
-      VALUES (@msgNum, @date, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 0, 0, 0)
+      INSERT INTO messages (msgNum, date, datePosted,typeCode, type, size, recipient, at, sender, subject, downloaded, read, archived, deleted)
+      VALUES (@msgNum, @date, @datePosted, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 0, 0, 0, 0)
       ON CONFLICT(msgNum) DO UPDATE SET
         date=@date,
         sender=@sender,
@@ -69,15 +71,23 @@ class DatabaseManager {
     `);
     stmt.run(msg);
 
-    // Mark this message as seen in the latest LM
-    this.db.prepare(`
-      UPDATE messages SET seenInLM = 1 WHERE msgNum = ?
-    `).run(msg.msgNum);
+    if (msg.type === "private") {
+      // Mark this message as seen in the latest LM
+      this.db.prepare(`
+        UPDATE messages SET seenInLM = 1 WHERE msgNum = ?
+      `).run(msg.msgNum);
+      
+    } else if (msg.type === "bulletin") {
+      // Mark this message as seen in the latest LB
+      this.db.prepare(`
+        UPDATE messages SET seenInLB = 1 WHERE msgNum = ?
+      `).run(msg.msgNum);
+    }
   }
 
   saveMessageBody(msgNum, body) {
     this.db.prepare(`
-      UPDATE messages SET body = ? WHERE msgNum = ?
+      UPDATE messages SET body = ?, downloaded = 1 WHERE msgNum = ?
     `).run(body, msgNum);
   }
 
@@ -115,8 +125,8 @@ class DatabaseManager {
     const type = msg.type === "P" ? "private" : "bulletin";
 
     const stmt = this.db.prepare(`
-      INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, saved, outbox)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+      INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, downloaded, read, archived, deleted)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
     `);
     stmt.run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
 
@@ -139,8 +149,12 @@ class DatabaseManager {
     this.db.prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
   }
 
-  markMessageSaved(msgNum) {
-    this.db.prepare("UPDATE messages SET saved = 1 WHERE msgNum = ?").run(msgNum);
+  markMessageArchived(msgNum) {
+    this.db.prepare("UPDATE messages SET archived = 1 WHERE msgNum = ?").run(msgNum);
+  }
+
+  markMessageDownloaded(msgNum) {
+    this.db.prepare("UPDATE messages SET downloaded = 1 WHERE msgNum = ?").run(msgNum);
   }
 
   deleteMessage(msgNum) {
@@ -168,31 +182,31 @@ class DatabaseManager {
   getPrivateMessagesForDownload() {
     return this.db.prepare(`
       SELECT msgNum FROM messages
-      WHERE type='private' AND deleted=0 AND read=0
+      WHERE type='private' AND deleted=0 AND downloaded = 0
     `).all();
   }
 
   markPrivateMessagesSeen() {
-    this.db.prepare("UPDATE messages SET seenInLP = 0 WHERE type='private'").run();
+    this.db.prepare("UPDATE messages SET seenInLP = 1 WHERE type='private'").run();
   }
 
   deleteUnseenPrivateMessages() {
     this.db.prepare(`
       UPDATE messages
       SET deleted = 1
-      WHERE type='private' AND seenInLP = 0 AND saved = 0
+      WHERE type='private' AND seenInLP = 1 AND downloaded = 0
     `).run();
   }
 
   markBulletinMessagesSeen() {
-    this.db.prepare("UPDATE messages SET seenInLB = 0 WHERE type='bulletin'").run();
+    this.db.prepare("UPDATE messages SET seenInLB = 1 WHERE type='bulletin'").run();
   }
 
   deleteUnseenBulletinMessages() {
     this.db.prepare(`
       UPDATE messages
       SET deleted = 1
-      WHERE type='bulletin' AND seenInLB = 0 AND saved = 0
+      WHERE type='bulletin' AND seenInLB = 0 AND downloaded = 0
     `).run();
   }
 

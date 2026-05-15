@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.on("ui:open-about", callback),
 
     onToast: (callback) =>
-    ipcRenderer.on("ui:toast", (_e, text) => callback(text)),
+        ipcRenderer.on("ui:toast", (_e, text) => callback(text)),
 
     //
     // MESSAGE LIST / DB ACCESS
@@ -61,14 +61,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getMessageByMsgNum: (msgNum) => ipcRenderer.invoke("messages:get-by-msgnum", msgNum),
 
     deleteMessage: (id) => ipcRenderer.invoke("messages:delete", id),
-    markMessageSaved: (id) => ipcRenderer.invoke("messages:mark-saved", id),
+
+    markMessageArchived: (id) => ipcRenderer.invoke("messages:mark-archived", id),
+
+    markMessageDownloaded: (id) => ipcRenderer.invoke("messages:mark-download", id),
+
     markMessageRead: (id) => ipcRenderer.invoke("messages:mark-read", id),
 
     onMessageDeleted: (callback) =>
         ipcRenderer.on("messages:deleted", (_e, msgNum) => callback(msgNum)),
 
-    onMessageSaved: (callback) =>
-        ipcRenderer.on("messages:saved", (_e, msgNum) => callback(msgNum)),
+    onMessageDownloaded: (callback) =>
+        ipcRenderer.on("messages:downloaded", (_e, msgNum) => callback(msgNum)),
+
+    onMessageArchived: (callback) =>
+        ipcRenderer.on("messages:archived", (_e, msgNum) => callback(msgNum)),
 
     onMessageRead: (callback) =>
         ipcRenderer.on("messages:read", (_e, id) => callback(id)),
@@ -99,6 +106,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     onBulletinList: (callback) =>
         ipcRenderer.on("bbs:bulletin-list", (_e, rows) => callback(rows)),
+
+    // CLEAR MESSAGE VIEW
+    onClearMessageView: (callback) =>
+        ipcRenderer.on("bbs:clear-message-view", (_e) => callback()),
+
+    // COMMAND OUTPUT
+    onCommandOutput: (callback) =>
+        ipcRenderer.on("bbs:command-output", (_e, line) => callback(line)),
 
 
     //
