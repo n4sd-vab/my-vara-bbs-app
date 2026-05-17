@@ -113,6 +113,7 @@ class DatabaseManager {
   }
 
   saveMessage(msg) {
+    msg.msgNum = Date.now(); // Temporary msgNum until we get the real one from the BBS after sending
     const date = new Date();
     const formatter = new Intl.DateTimeFormat('en-GB', {
       day: '2-digit',
@@ -125,12 +126,17 @@ class DatabaseManager {
     const type = msg.type === "P" ? "private" : "bulletin";
 
     const stmt = this.db.prepare(`
-      INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, downloaded, read, archived, deleted)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
+      INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, sent )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
     `);
     stmt.run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
 
     return true;
+  }
+
+  getLastInsertRowId() {
+    const row = this.db.prepare("SELECT last_insert_rowid() AS id").get();
+    return row ? row.id : null;
   }
 
   getAllMessages() {
@@ -171,12 +177,22 @@ class DatabaseManager {
     return this.db.prepare("SELECT * FROM messages WHERE outbox = 1 AND deleted = 0 AND sent = 0").all();
   }
 
-  updateOutboxMessageSent(id, msgNum, size, date) {
+  updateOutboxMessageSent(id, msgNum, size, date, datePosted) {
+    console.log("Updating outbox message as sent:", { id, msgNum, size, date, datePosted });
     this.db.prepare(`
       UPDATE messages
-      SET msgNum = ?, size = ?, sent = 1, outbox = 0, date = ?
+      SET msgNum = ?, size = ?, sent = 1, outbox = 0, date = ?, datePosted = ?
       WHERE id = ?
-    `).run(msgNum, size, date, id);
+    `).run(msgNum, size, date, datePosted, id);
+  }
+
+  updateMessageSent(id, msgNum, size, date, datePosted) {
+    console.log("Updating direct message as sent:", { id, msgNum, size, date, datePosted });
+    this.db.prepare(`
+      UPDATE messages
+      SET msgNum = ?, size = ?, sent = 1, date = ?, datePosted = ?
+      WHERE id = ?
+    `).run(msgNum, size, date, datePosted, id);
   }
 
   getPrivateMessagesForDownload() {

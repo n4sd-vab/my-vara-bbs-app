@@ -19,7 +19,6 @@ contextBridge.exposeInMainWorld("vara", {
     }
 });
 
-
 //
 // SETTINGS API 
 //
@@ -31,7 +30,6 @@ contextBridge.exposeInMainWorld("settings", {
     onUpdated: (callback) =>
         ipcRenderer.on("settings:updated", (_e, data) => callback(data))
 });
-
 
 //
 // BBS / MESSAGES API

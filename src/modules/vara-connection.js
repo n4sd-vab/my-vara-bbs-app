@@ -15,6 +15,17 @@ class VaraConnection {
   }
 
   async connect() {
+    if (this.isConnected()) {
+      this.logToRenderer('info', 'Already connected to VARA');
+      return true;
+    }
+
+    if (this.cmdSocket && this.cmdSocket.destroyed) this.cmdSocket = null;
+    if (this.dataSocket && this.dataSocket.destroyed) this.dataSocket = null;
+    if (this.cmdSocket || this.dataSocket) {
+      this.disconnect();
+    }
+
     return new Promise((resolve, reject) => {
       let pending = 2;
       let hadError = false;

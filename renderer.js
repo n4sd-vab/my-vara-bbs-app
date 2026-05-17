@@ -102,6 +102,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     console.log("txInput:", txInput);
 
+    
     // Append text to command console
     function appendCommand(type, msg) {
         commandConsole.value += `[${type}] ${msg}\n`;
@@ -1194,7 +1195,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             statusVara.style.color = "#0f0";
         }
 
-        if (line.includes("socket closed")) {
+        if (line.includes("socket closed") ||
+            line.includes("Connection closed") ||
+            line.includes("Disconnected from VARA") ||
+            line.includes("TCP link lost") ||
+            line.includes("VARA closed")
+        ) {
             setConnectedUI(false);
             statusVara.textContent = "Disconnected";
             statusVara.style.color = "#f33";
@@ -1271,32 +1277,15 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         }
     }
-
-    let varaConnected = false;
-
-    async function connectToVara() {
-        if (varaConnected) return;
-
-        try {
-            await window.vara.connect();
-            appendCommand('info', 'Connect requested');
-            // whatever else you do on successful connect
-        } catch (err) {
-            appendCommand('error', 'Connect failed: ' + err.message);
-        }
-    }
-
-
-    /*     connectBtn.addEventListener('click', async () => {
+    // Connect button for VARA TCP connection
+    connectBtn.addEventListener('click', async () => {
             try {
                 await window.vara.connect();
                 appendCommand('info', 'Connect requested');
             } catch (err) {
                 appendCommand('error', 'Connect failed: ' + err.message);
             }
-        }); */
-
-    // connectBtn.addEventListener('click', connectToVara);
+        });
 
     // Command input (Enter to send)
     commandInput.addEventListener('keydown', async (e) => {
@@ -1352,7 +1341,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             appendCommand('error', 'Disconnect BBS failed: ' + err.message);
         }
     });
-
+    // Disconnect button for VARA TCP connection
     disconnectBtn.addEventListener('click', async () => {
         appendCommand('local', '> DISCONNECT');
         try {
@@ -1382,7 +1371,6 @@ window.addEventListener('DOMContentLoaded', async () => {
             showCategoryPopup();
         });
     }
-
 
     /*  addressBookBtn.addEventListener('click', () => {
          window.electronAPI.openAddressBookAdd();
@@ -1430,22 +1418,6 @@ window.addEventListener('DOMContentLoaded', async () => {
              appendCommand('error', 'List New failed: ' + err.message);
          }
      }); */
-
-    document.addEventListener('DOMContentLoaded', () => {
-        // Cache elements, set initial UI
-        setConnectedUI(false);
-
-        // Register VARA line listener BEFORE connecting
-        window.vara.onLine((type, line) => {
-            handleVaraLine(type, line);
-        });
-
-        // Button wiring
-        connectBtn.addEventListener('click', connectToVara);
-
-        // Auto-connect once everything above is ready
-        connectToVara();
-    });
 
     document.getElementById("sendBtn").addEventListener("click", () => {
         window.electronAPI.sendOutbox();
@@ -1550,6 +1522,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         document.getElementById("aboutModal").style.display = "none";
     });
 
+    // ------------------------------------------------------------
+    // COMPOSE SEND/CANCEL BUTTONS
+    // ------------------------------------------------------------
     composeSendBtn.addEventListener('click', async () => {
         const msgNum = Date.now(); // temporary unique ID
         const recipient = document.getElementById('composeTo').value.trim();
@@ -1563,32 +1538,37 @@ window.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // Build BBS message format
-        // Old format
-        /* const cmd = (type === "P") ? `SP ${to}\r` : `SB ${to}\r`;
-        const msg =
-            cmd +
-            `${subject}\r` +
-            body.replace(/\n/g, "\r") +
-            `\r/EX\r`; */
-
-        const msg = {
+/*         await saveMessage({
             msgNum,
             type,
             recipient,
             sender,
             subject,
             body
-        };
+        }); */
 
         appendCommand('local', 'TX: Sending message');
 
-        await saveMessage({ msg });
-
         try {
-            await window.electronAPI.sendBbsMessage(msg);
+            await window.electronAPI.saveMessage({
+                msgNum,
+                type,
+                recipient,
+                sender,
+                subject,
+                body
+            });
 
-            // reset form and close modal
+            await window.electronAPI.sendBbsMessage({
+                msgNum,
+                type,
+                recipient,
+                sender,
+                subject,
+                body
+            });
+
+            // reset compose form and close modal
             composeModal.style.display = "none";
             composeTo.value = "";
             composeSubject.value = "";
@@ -1597,8 +1577,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         } catch (err) {
             appendCommand('error', 'Send message failed: ' + err.message);
         }
-    });
 
+        composeModal.style.display = "none";
+    });
+    // ------------------------------------------------------------
+    // Save to outbox without sending
+    // ------------------------------------------------------------
     composeSaveBtn.addEventListener('click', async () => {
         const msgNum = Date.now(); // temporary unique ID
         const recipient = document.getElementById('composeTo').value.trim();
@@ -1625,8 +1609,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Initialize message list with private messages
     renderMessageList();
 
-    connectToVara(); // Start connection immediately
+    // Auto-connect to the VARA modem on startup
+    try {
+        await window.vara.connect();
+        appendCommand('info', 'VARA modem connected on startup');
+    } catch (err) {
+        appendCommand('error', 'VARA modem auto-connect failed: ' + err.message);
+    }
 
 });
 console.log("RENDERER LOADED");
-

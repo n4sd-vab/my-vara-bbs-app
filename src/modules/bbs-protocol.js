@@ -21,6 +21,7 @@ class BbsProtocol {
     this.whitePagesResults = [];
     this.wpBuffer = "";
     this.subscriptions = [];
+    this.outboxMsg = false;
   }
 
   setSubscriptions(list) {
@@ -148,6 +149,7 @@ class BbsProtocol {
     }
 
     for (const msg of outbox) {
+      this.outboxMsg = true;
       await this.uploadSingleMessage(msg);
     }
 
@@ -195,12 +197,25 @@ class BbsProtocol {
         const size = match[2];
 
         // Update DB
-        const date = createDateString();
-        this.database.updateOutboxMessageSent(msg.id, msgNum, size, date);
+        const date = createDateString(); //short BBS format dd-mmm
+        const pDate = new Date();
+        const datePosted = pDate.toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+       
+        if (this.outboxMsg) {
+          // Replace temporary msgNum with real one and mark as sent
+          this.database.updateOutboxMessageSent(msg.id, msgNum, size, date, datePosted);
+        } else {
+          // Messages sent directly from compose form
+          const lastInsertId = this.database.getLastInsertRowId(); // Get the last inserted message ID
+
+          this.database.updateMessageSent(lastInsertId, msgNum, size, date, datePosted);
+        }
+        this.outboxMsg = false;
 
         resolve();
-
+        
       } catch (err) {
+
         console.error("Upload failed:", err);
         reject(err);
       }
