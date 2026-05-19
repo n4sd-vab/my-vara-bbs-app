@@ -7,8 +7,8 @@ It also features a hideable control window to debug the commands sent to the VAR
 The application uses VARA's control and data network ports, and not the modem's kiss port.<br>
 Click on a message line to retrive it. <br>
 ## New Features:
-### Message Tabs - Seperates Private messages from bulletins<br>
-### Bulletin Filtering - 2 ways, Right click on a bulletin to filter the list to that category, or Right click on the Bulletin Tab to get a list of categories and choose one. Click on Bulletin Tab to clear the filter.<br>
+### Message Tabs - Seperates Private messages from bulletins. Also tabs for Sent and Arvhived messages<br>
+### Bulletin Filtering - 2 ways, Right click on a bulletin to filter the list to that category, or Right click on the Bulletin Tab to see the list of categories and choose one. Click on Bulletin Tab to clear the filter.<br>
 ### Bulletin Subscriptions - From the Settings menu choose Preferences and select the bulletins you would like to download with the [Get Messages] button.<br>
 ### Get Messages - Connects to the BBS, Adds any new messages to the list, automatically downloads all private messages and any bulletins that you are subscribed to.<br>
 ### Address Book - Can be populated from you local BBS White Pages.<br>
