@@ -15,6 +15,9 @@ class BbsProtocol {
     this.currentReadMsgNum = null;
     this.currentReadBody = [];
     this.readBuffer = "";
+    this.readQueue = [];   // NEW — queue for auto-downloads
+    this.batchQueue = [];     // array of arrays of msgNums
+    this.batchActive = false;
     this.endOfFileList = false;
     this.endOfReadMode = false;
     this.whitePagesMode = false;
@@ -22,6 +25,9 @@ class BbsProtocol {
     this.wpBuffer = "";
     this.subscriptions = [];
     this.outboxMsg = false;
+
+    this.privateToDownload = [];
+    this.bulletinsToDownload = [];
   }
 
   setSubscriptions(list) {
@@ -89,7 +95,7 @@ class BbsProtocol {
     // FAST SYNC: only get NEW messages
     this.endOfFileList = false;
     this.messageListMode = "bbs";
-    this.varaConnection.sendData("L\r");   // NEW messages only
+    this.varaConnection.sendData("L \r");   // NEW messages only
 
     await this.waitForListModeToFinish();
 
@@ -101,7 +107,10 @@ class BbsProtocol {
 
     if (toDownload.length > 0) {
       this.endOfReadMode = false;
-      this.varaConnection.sendData("R " + toDownload.join(" ") + "\r");
+      // this.varaConnection.sendData("R " + toDownload.join(" ") + "\r");
+      for (const msgNum of toDownload) {
+        this.downloadMessage(msgNum);
+      }
       this.inReadMode = true;
       await this.waitForReadModeToFinish();
     }
@@ -200,7 +209,7 @@ class BbsProtocol {
         const date = createDateString(); //short BBS format dd-mmm
         const pDate = new Date();
         const datePosted = pDate.toISOString().slice(0, 16).replace('T', ' ') + 'Z';
-       
+
         if (this.outboxMsg) {
           // Replace temporary msgNum with real one and mark as sent
           this.database.updateOutboxMessageSent(msg.id, msgNum, size, date, datePosted);
@@ -213,7 +222,7 @@ class BbsProtocol {
         this.outboxMsg = false;
 
         resolve();
-        
+
       } catch (err) {
 
         console.error("Upload failed:", err);
@@ -236,27 +245,60 @@ class BbsProtocol {
     }
   }
 
-  finishReadMode() {
-    if (!this.inReadMode) return;
+  /*   finishReadMode() {
+      if (!this.inReadMode) return;
+  
+      console.log("Finishing READ MODE for message", this.currentReadMsgNum);
+  
+      this.inReadMode = false;
+  
+      const body = this.currentReadBody.join("\n");
+      console.log("READ MODE END for message", this.currentReadMsgNum);
+      console.log("READ MODE: accumulated body length =", this.currentReadBody.length);
+  
+      this.database.saveMessageBody(this.currentReadMsgNum, body);
+  
+      this.sendToRenderer("bbs:message-body", {
+        msgNum: this.currentReadMsgNum,
+        body
+      });
+      this.sendToRenderer("bbs:message-read", this.currentReadMsgNum);
+  
+      this.currentReadBody = [];
+      this.readBuffer = "";
+    } */
 
-    console.log("Finishing READ MODE for message", this.currentReadMsgNum);
+  /* finishReadMode() {
+    console.log("Finished reading msg", this.readingMsgNum);
 
     this.inReadMode = false;
-
-    const body = this.currentReadBody.join("\n");
-    console.log("READ MODE END for message", this.currentReadMsgNum);
-    console.log("READ MODE: accumulated body length =", this.currentReadBody.length);
-
-    this.database.saveMessageBody(this.currentReadMsgNum, body);
-
-    this.sendToRenderer("bbs:message-body", {
-      msgNum: this.currentReadMsgNum,
-      body
-    });
-    this.sendToRenderer("bbs:message-read", this.currentReadMsgNum);
-
+    this.readingMsgNum = null;
     this.currentReadBody = [];
     this.readBuffer = "";
+
+    // Start next queued read if any
+    if (this.readQueue.length > 0) {
+      const next = this.readQueue.shift();
+      console.log("Starting next queued read:", next);
+      this.downloadMessage(next);
+    }
+  } */
+
+  finishReadMode() {
+    console.log("Finished reading msg", this.readingMsgNum);
+
+    this.inReadMode = false;
+    this.promptSeen = false;
+    this.lastBodyTime = null;
+    this.readingMsgNum = null;
+    this.currentReadBody = [];
+    this.readBuffer = "";
+
+    if (this.readQueue.length > 0) {
+      const next = this.readQueue.shift();
+      console.log("Starting next queued read:", next);
+      this.downloadMessage(next);
+    }
   }
 
   // Send command: Onlyused for Direct BBS Command Entry in the UI
@@ -278,14 +320,67 @@ class BbsProtocol {
     }
   }
 
-  downloadBulletin(msgNum) {
+  /*   downloadBulletin(msgNum) {
+      this.inReadMode = true;
+      this.commandMode = false;
+      this.readingMsgNum = msgNum;  // new
+      this.currentReadMsgNum = msgNum; 
+      this.currentReadBody = [];
+  
+      this.varaConnection.sendData(`R ${msgNum}\r`);
+    } */
+
+
+  /*   downloadMessage(msgNum) {
+      if (this.inReadMode) {
+        // Already reading something — queue this one
+        this.readQueue.push(msgNum);
+        return;
+      }
+  
+      console.log("Starting read for message", msgNum);
+  
+      this.inReadMode = true;
+      this.readingMsgNum = msgNum;
+      this.currentReadBody = [];
+      this.readBuffer = "";
+  
+      this.varaConnection.sendData(`R ${msgNum}\r`);
+    } */
+
+  downloadMessage(msgNum) {
+    // Single-click = batch of one
+    this.queueBatchDownload([msgNum]);
+  }
+
+  queueBatchDownload(msgNums) {
+    if (!msgNums || msgNums.length === 0) return;
+
+    this.batchQueue.push(msgNums);
+    if (!this.batchActive) {
+      this.startNextBatch();
+    }
+  }
+
+  startNextBatch() {
+    if (this.batchQueue.length === 0) {
+      this.batchActive = false;
+      return;
+    }
+
+    const msgNums = this.batchQueue.shift();
+    console.log("Starting batch read for messages:", msgNums);
+
+    this.batchActive = true;
     this.inReadMode = true;
-    this.commandMode = false;
-    this.currentReadMsgNum = msgNum;
+
+    this.readBuffer = "";
     this.currentReadBody = [];
 
-    this.varaConnection.sendData(`R ${msgNum}\r`);
+    this.varaConnection.sendData(`R ${msgNums.join(" ")}\r`);
   }
+
+
 
   // WhitePages handling
   startWhitePages() {
@@ -319,6 +414,8 @@ class BbsProtocol {
 
     // Message list mode
     if (this.messageListMode === "bbs" || this.messageListMode === "lp" || this.messageListMode === "lb") {
+      this.privateToDownload = [];
+      this.bulletinsToDownload = [];
       this.processListModeData(data);
       return;
     }
@@ -386,6 +483,16 @@ class BbsProtocol {
         this.listBuffer = "";
         this.endOfFileList = true;
         this.sendToRenderer("bbs:list-end");
+
+        // Kick off batch downloads
+        if (this.privateToDownload.length > 0) {
+          this.queueBatchDownload(this.privateToDownload);
+        }
+
+        if (this.bulletinsToDownload.length > 0) {
+          this.queueBatchDownload(this.bulletinsToDownload);
+        }
+
         return;
       }
 
@@ -396,12 +503,17 @@ class BbsProtocol {
 
         console.log("Line added to database:", parsed);
 
-        // ⭐ Auto-download subscribed bulletins
-        if (parsed.type === "bulletin" &&
-          this.subscriptions.includes(parsed.recipient)) {
+        // Collect private messages
+        if (parsed.type === "private" && !parsed.downloaded) {
+          this.privateToDownload.push(parsed.msgNum);
+        }
 
-          console.log("Auto-downloading subscribed bulletin:", parsed.msgNum);
-          this.downloadBulletin(parsed.msgNum);
+        // Collect subscribed bulletins
+        if (parsed.type === "bulletin" &&
+          this.subscriptions.includes(parsed.recipient) &&
+          !parsed.downloaded) {
+
+          this.bulletinsToDownload.push(parsed.msgNum);
         }
 
       }
@@ -410,7 +522,7 @@ class BbsProtocol {
     this.listBuffer = parts[parts.length - 1];
   }
 
-  processReadModeData(data) {
+  /* processReadModeData(data) {
     const text = data.toString();
     this.readBuffer += text;
 
@@ -470,7 +582,76 @@ class BbsProtocol {
     }
 
     this.readBuffer = parts[parts.length - 1];
+  } */
+
+  processReadModeData(data) {
+    if (!this.inReadMode) {
+      // Safety: ignore if we're not in read mode
+      return;
+    }
+
+    const text = data.toString();
+    this.readBuffer += text;
+
+    const parts = this.readBuffer.split('\r');
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      const raw = parts[i];
+      const line = raw.trim();
+
+      // 1. Explicit footer: end of ONE message
+      const footer = line.match(/^\[End of Message #(\d+)/i);
+      if (footer) {
+        const msgNum = parseInt(footer[1]);
+        console.log("Explicit footer for msg", msgNum);
+
+        this.currentReadBody.push(raw);
+        const body = this.currentReadBody.join("\n");
+
+        this.database.saveMessageBody(msgNum, body);
+        this.database.markMessageDownloaded(msgNum);
+
+        this.sendToRenderer("bbs:message-body", { msgNum, body });
+        this.sendToRenderer("bbs:message-read", msgNum);
+
+        // Prepare for possible next message in same batch
+        this.currentReadBody = [];
+        continue;
+      }
+
+      // 2. Prompt: end of the ENTIRE batch
+      if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
+        console.log("Prompt detected: end of batch read");
+
+        this.inReadMode = false;
+        this.readBuffer = "";
+        this.currentReadBody = [];
+
+        // Start next batch if queued
+        if (this.batchQueue.length > 0) {
+          this.startNextBatch();
+        } else {
+          this.batchActive = false;
+        }
+        return;
+      }
+
+      // 3. Start of a new message header
+      if (/^From:\s+(.+)/i.test(line)) {
+        console.log("Start of message header");
+        this.currentReadBody = [];
+        this.currentReadBody.push(raw);
+        continue;
+      }
+
+      // 4. Normal body line
+      this.currentReadBody.push(raw);
+    }
+
+    // Keep remainder in buffer
+    this.readBuffer = parts[parts.length - 1];
   }
+
 
   processNormalData(data) {
     this.varaConnection.dataBuffer += data.toString();

@@ -198,7 +198,7 @@ class DatabaseManager {
   getPrivateMessagesForDownload() {
     return this.db.prepare(`
       SELECT msgNum FROM messages
-      WHERE type='private' AND deleted=0 AND downloaded = 0
+      WHERE type='private' AND deleted = 0 AND downloaded = 0
     `).all();
   }
 
