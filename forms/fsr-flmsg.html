@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>PACKET RADIO FIELD SITUATION REPORT</title>
+
+	<!-- version 0.1a Flmsg -->
+	<meta name="author" content="David Elkins KN4LQN">
+	<meta name="description" content="Simple forms to generate text for use with radio (Flmsg)">
+
+	<META NAME="EDITABLE" CONTENT="true">
+        <META NAME="MENU_ITEM" CONTENT="Packet Radio Field Situation Report">
+</head>
+<body>
+<p>
+<b>PACKET RADIO FIELD SITUATION REPORT</b>
+</p>
+<form>
+<pre>
+Add an agency or group name: <input type="text" name="agency" id="agency" size=50>
+
+PRECEDENCE: <select name="precedence" id="precedence"><option value="Z">Z/ Flash</option><option value="O">O/ Immediate</option><option value="P">P/ Priority</option><option value="R" selected>R/ Routine</option></select>
+
+DATE/TIME: <input type="text" name="datetime" id="datetime" size=25>    TASK: # <input type="text" name="task" id="task" size=15>
+
+FROM: <input type="text" name="from" id="from" size=20>
+
+TO: <input type="text" name="to" id="to" size=100>
+
+INFO (CC): <input type="text" name="info" id="info" size=100>
+
+
+1. <b>Is there an EMERGENT/LIFE SAFETY Need:</b> <select name="lifesafety" id="lifesafety"><option value="YES">YES</option><option value="NO" selected>NO</option></select>
+
+2. City: <input type="text" name="city" id="city" size=25>
+
+2a. County: <input type="text" name="county" id="county" size=25>
+
+2b. State: <input type="text" name="state" id="state" size=25>
+
+2c. Territory: <input type="text" name="territory" id="territory" size=25>
+
+3. Reporting Grid Sq: <input type="text" name="gridsquare" id="gridsquare" size=8>
+
+3a. Latitude: <input type="text" name="latitude" id="latitude" size=25>  3b. Longitude: <input type="text" name="longitude" id="longitude" size=25>
+
+
+4a. POTS landlines functioning? <select name="pots" id="pots"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+4b. VOIP landlines functioning? <select name="voip" id="voip"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+5a. Cell phone voice calls functioning? <select name="cellcalls" id="cellcalls"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+5b. Cell phone texts functioning? <select name="celltexts" id="celltexts"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+6. AM/FM Broadcast Stations functioning? <select name="amfm" id="amfm"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+7a. OTA TV functioning? <select name="otatv" id="otatv"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+7b. Satellite TV functioning? <select name="sattv" id="sattv"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+7c. Cable TV functioning? <select name="cabletv" id="cabletv"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+8. Public Water Works functioning? <select name="water" id="water"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+9a. Commercial Power functioning? <select name="powerfunc" id="powerfunc"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+9b. Commercial Power Stable? <select name="powerstable" id="powerstable"><option value="YES">YES</option><option value="NO">NO - Brown outs/blinking lights</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+9c. Natural Gas Supply functioning? <select name="gas" id="gas"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+10. Internet functioning? <select name="internet" id="internet"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+11a. NOAA weather radio functioning? <select name="noaafunc" id="noaafunc"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+11b. NOAA weather radio audio degraded? <select name="noaadeg" id="noaadeg"><option value="YES">YES</option><option value="NO">NO</option><option value="UNKNOWN" selected>Unknown - N/A</option></select>
+
+
+12. Additional Comments: Brief summary of current situation - expected outage times, major observations, etc.
+<textarea name="comments" id="comments" rows=3 cols=50>
+</textarea>
+
+13. POC (Your Call Here) <input type="text" name="poc" id="poc" size=20>
+</pre>
+
+<br>
+<hr>
+<br>
+
+</form>
+
+<br>
+<hr>
+<br>
+
+<table border=0 width="100%"> 
+	<tr> 
+		<td>Form Concept By: N3MEL</td> 
+		<td>Form Created By: KN4LQN</td> 
+		<td>Ver 1.2a<br>Flmsg</td> 
+	</tr> 
+	<tr> 
+		<td colspan=3 align="center"> 
+			<a href="http://vden.org/pktnet/fsr-flmsg.html">Use the latest version of this form online</a>
+		</td> 
+	</tr> 
+</table>
+
+<br>
+
+&nbsp;
+
+</body>
+</html>

@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>PACKET RADIOGRAM</title>
+
+	<!-- version 0.1 -->
+	<meta name="author" content="David Elkins KN4LQN">
+	<meta name="description" content="Simple forms to generate text for use with radio (packet, varac, etc)">
+
+	<script src="src/jquery-3.7.1.min.js"></script>
+	<link rel="stylesheet" href="src/jquery-ui.css">
+	<script src="src/jquery-ui.js"></script>
+
+	<link rel="stylesheet" href="css/forms.css">
+
+<script>
+$(document).ready(function(){
+	function pad(n) { return ("0" + n).slice(-2); }
+
+	const months = [ "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC", ];
+
+	var now = new Date();
+	$("#date").val(months[now.getMonth()] + " " + now.getDate());
+
+	$("input[type=text]").each(function() {
+		if ($(this).attr("required")) {
+			$(this).on("change focus", function() { $(this).css("border-color","initial"); });
+		}
+		$("#time").on("change focus", function() { $(this).css("border-color","initial"); });
+		$("#phone").on("change focus", function() { $(this).css("border-color","initial"); });
+	});
+
+	// preamble
+	$("#radiogram_number").on("input", function() { this.value = this.value.replace(/[^0-9]/,""); });
+	$("#origin_station").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z]/,""); });
+	$("#hxa_extra").on("input", function() { this.value = this.value.replace(/[^0-9]/,""); });
+	$("#hxb_extra").on("input", function() { this.value = this.value.replace(/[^0-9]/,""); });
+	$("#hxf_extra").on("input", function() { this.value = this.value.replace(/[^0-9\/]/,""); });
+	$("#origin_place").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z ]/,""); });
+	$("#check").on("input", function() { this.value = this.value.replace(/[^0-9ARLarl ]/,""); });
+	$("#time").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z]/,""); });
+	$("#date").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z ]/,""); });
+
+	// address
+	$("#addressee").on("input", function() { this.value = this.value.replace(/[^A-Za-z \/-]/,""); });
+	$("#addressee").on("change input", function() { this.value = this.value.replace(/[-]/," DASH "); });
+	$("#addressee2").on("input", function() { this.value = this.value.replace(/[^A-Za-z \/-]/,""); });
+	$("#addressee2").on("change input", function() { this.value = this.value.replace(/[-]/," DASH "); });
+	$("#addressee_callsign").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z]/,""); });
+	$("#address").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z \/-]/,""); });
+	$("#address").on("change input", function() { this.value = this.value.replace(/[-]/," DASH "); });
+	$("#address2").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z \/-]/,""); });
+	$("#address2").on("change input", function() { this.value = this.value.replace(/[-]/," DASH "); });
+	$("#city").on("input", function() { this.value = this.value.replace(/[^A-Za-z ]/,""); });
+	$("#state").on("input", function() { this.value = this.value.replace(/[^A-Za-z]/,""); });
+	$("#zip").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z -]/,""); });
+	$("#zip").on("change input", function() { this.value = this.value.replace(/[-]/," DASH "); });
+	$("#phone").on("input", function() { this.value = this.value.replace(/[^0-9 +]/,""); });
+	$("#ext").on("input", function() { this.value = this.value.replace(/[^0-9]/,""); });
+	$("#email").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z\.\@\#\/\_ -]/,""); });
+	$("#email").on("change input", function() { this.value = this.value.replace(/[\.]/," DOT ").replace(/[\@]/," ATSIGN ").replace(/[\#]/," NUMBERISGN ").replace(/[\/]/," SLASH ").replace(/[\_]/," UNDERSCORE ").replace(/[\-]/," DASH ").replace(/  /," "); });
+	$("#op_note1").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z ]/,""); });
+
+	// message
+	$("#message").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z\.\? \/-]/,""); });
+	$("#message").on("change input", function() {
+		this.value = this.value.replace(/[?]/," QUERY ").replace(/[-]/," DASH ");
+		this.value = this.value.replace(/([A-Za-z])[.]/,"$1 X ");
+		this.value = this.value.replace(/(\d)[.]/,"$1R");
+		this.value = this.value.replace(/[ ]+/g," ");
+
+		// calculate the check
+		var check = this.value.replace(/\s+$/,"").replace(/^\s+/,"").split(/[\s]/).length;
+		if (this.value.match(/\bARL\b/)) { check = "ARL " + check; }
+		$("#check").val(check);
+	});
+
+	// signature
+	$("#signature").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z\. ]/,""); });
+	$("#op_note1").on("input", function() { this.value = this.value.replace(/[^0-9A-Za-z ]/,""); });
+
+	$("input[type=text], textarea").each(function() {
+		if ($(this).attr("data-default")) {
+			$(this).css("color","gray");
+			$(this).val($(this).attr("data-default"));
+			$(this).on("focus", function() {
+				if ($(this).val() == $(this).attr("data-default")) {
+					$(this).val("");
+					$(this).css("color","black");
+				}
+			});
+			$(this).on("change blur", function() {
+				if($(this).val().length == 0) {
+					$(this).css("color","gray");
+					$(this).val($(this).attr("data-default"));
+				}
+				else if ($(this).val() != $(this).attr("data-default")) {
+					$(this).css("color","black");
+				}
+			});
+		}
+	});
+
+	$("#save-data").on("click", function() {
+		var form_fields = $("input[type=text], textarea, select", $("form"));
+		var data = {};
+		$(form_fields).each(function(e) {
+			var field = $(this).attr("id");
+			if ($(this).attr("data-default")) {
+				if ($(this).val() == $(this).attr("data-default")) {
+					data[field] = "";
+					return;
+				}
+			};
+			data[field] = $(this).val();
+		});
+		$("input[type=checkbox]", $("form")).each(function(e) {
+			var field = $(this).attr("id");
+			data[field] = $(this).prop("checked");
+		});
+		data = JSON.stringify(data);
+		var subject = "Radiogram";
+		if ($("#radiogram_number").val()) { subject += " " + $("#radiogram_number").val(); }
+
+		var filename = subject + " " + $("#date").val() + " " + $("#time").val() + ".json";
+		filename = prompt("Please enter filename to save as",filename);
+		if (filename == null) { return; }
+
+		var new_file = new File([data],filename,{type: "application/json"});
+		var download_link = document.createElement('a');
+		download_link.style.display = 'none';
+		download_link.href = URL.createObjectURL(new_file);
+		download_link.download = new_file.name;
+		download_link.onclick = function(e) { $(e.target).remove(); }
+		$("body").append(download_link);
+		download_link.click();
+	});
+
+	$("#load-data").on("click", function() {
+		$("#load-file").click();
+	});
+	$("#load-file").on("change", function() {
+		var new_file = $(this)[0].files[0];
+		var file_reader = new FileReader();
+		file_reader.onload = function() {
+			var data = {};
+			try {
+				data = JSON.parse(file_reader.result);
+			} catch (error) {
+				// do nothing
+			}
+			for (const [key, value] of Object.entries(data)) {
+				if ($("#"+key).attr('type') == 'checkbox' && value == true) {
+					$("#"+key).prop("checked", true);
+				} else {
+					$("#"+key).val(value);
+					$("#"+key).trigger("change");
+				}
+			}
+		};
+		file_reader.readAsText(new_file);
+	});
+
+	$("#generate").on("click",function() {
+		$("#dialog").empty();
+
+		$("input[type=text], textarea").each(function() {
+			if ($(this).attr("data-default")) {
+				if ($(this).val() == $(this).attr("data-default")) {
+					$(this).val("");
+				}
+			}
+			if ($(this).css("text-transform") == "uppercase") {
+				this.value = this.value.toUpperCase();
+			}
+		}); 
+
+		var missing_required = false;
+		$("input[type=text], textarea").each(function() {
+			if ($(this).attr("required") && $(this).val() == "") {
+				$(this).css("border-color","red");
+				missing_required = true;
+			}
+		});
+		if ($("#check").val() != "" && !$("#check").val().match(/^(ARL )?[\d]+$/)) {
+			$("#check").css("border-color","red");
+			missing_required = true;
+		}
+		if ($("#time").val() != "" && !$("#time").val().match(/^\d\d\d\d\w?\w?\w?$/)) {
+			$("#time").css("border-color","red");
+			missing_required = true;
+		}
+		if ($("#date").val() != "" && !$("#date").val().match(/^\w\w\w \d\d?$/)) {
+			$("#date").css("border-color","red");
+			missing_required = true;
+		}
+		if ($("#phone").val() != "") {
+			if (!$("#phone").val().match(/^[+]/) && !$("#phone").val().match(/^\d\d\d[ ]?\d\d\d[ ]?\d\d\d\d$/)) {
+				$("#phone").css("border-color","red");
+				missing_required = true;
+			}
+		}
+		if (missing_required) {
+			$("input[type=text], textarea").each(function() {
+				if ($(this).attr("data-default")) {
+					$(this).trigger("blur");
+				}
+			});
+			return;
+		}
+	
+		var html = "<pre>";
+		html += '<input type="text" style="width: 100%" value="QTC ' + $("#precedence").val() + " " + $("#city").val() + " " + $("#state").val() + " " + $("#zip").val().replace(/ DASH.*?$/,"") + '">\n';
+		html += '<textarea style="height:100%; width:100%; min-height: auto;">';
+
+		// preamble
+		var terms = [];
+
+		if ($("#is_service").prop("checked") == true) { terms.push("SVC"); }
+		terms.push($("#radiogram_number").val());
+
+		if ($("#is_exercise").prop("checked") == true) { terms.push("TEST"); }
+		terms.push($("#precedence").val());
+
+		if ($("#hxa").prop("checked") == true) { terms.push("HXA" + $("#hxa_extra").val()); }
+		if ($("#hxb").prop("checked") == true) { terms.push("HXB" + $("#hxb_extra").val()); }
+		if ($("#hxc").prop("checked") == true) { terms.push("HXC"); }
+		if ($("#hxd").prop("checked") == true) { terms.push("HXD"); }
+		if ($("#hxe").prop("checked") == true) { terms.push("HXE"); }
+		if ($("#hxf").prop("checked") == true) { terms.push("HXF" + $("#hxf_extra").val()); }
+		if ($("#hxg").prop("checked") == true) { terms.push("HXG"); }
+
+		terms.push($("#origin_station").val());
+		terms.push($("#check").val());
+		terms.push($("#origin_place").val());
+		if ($("#time").val() != "") { terms.push($("#time").val()); }
+		terms.push($("#date").val());
+
+		html += terms.join(" ");
+		html += "\n";
+
+
+		// address
+		html += $("#addressee").val();
+		if ($("#addressee_callsign").val() != "") { html += " " + $("#addressee_callsign").val(); }
+		html += "\n";
+		if ($("#addressee2").val() != "") { html += $("#addressee2").val(); html += "\n"; }
+		if ($("#address").val() != "") { html += $("#address").val(); html += "\n"; }
+		if ($("#address2").val() != "") { html += $("#address2").val(); html += "\n"; }
+		html += $("#city").val() + " " + $("#state").val() + " " + $("#zip").val();
+		html += "\n";
+		if ($("#phone").val() != "") {
+			// format
+			var phone = $("#phone").val();
+			phone = phone.replace(/[ ]/g,"");
+			if (!phone.match(/^[+]/)) {
+				phone = phone.replace(/^(\d\d\d)(\d\d\d)(\d\d\d\d)$/,"$1 $2 $3");
+			}
+			html += phone;
+			if ($("#ext").val() != "") {
+				html += " EXT " + $("#ext").val();
+			}
+			html += "\n";
+		}
+		if ($("#email").val() != "") { html += $("#email").val(); html += "\n"; }
+		if ($("#op_note1").val() != "") {
+			html += "OP NOTE " + $("#op_note1").val();
+			html += "\n";
+		}
+
+
+		// message
+		html += "BT\n";
+		html += $("#message").val().replace(/\s+$/,"").replace(/^\s+/,"").split(/((?:[\w\/]+ ){5})/g).filter(Boolean).join("\n");
+		html += "\n";
+		html += "BT\n";
+
+		// signature
+		html += $("#signature").val();
+		html += "\n";
+		if ($("#op_note2").val() != "") { html += "OP NOTE " + $("#op_note2").val(); html += "\n"; }
+
+		html += "AR\n";
+
+		html += "</textarea>\n";
+		html += "</pre>";
+
+		$(html).appendTo($("#dialog"));
+
+		$("#dialog").dialog({
+			width: 800,
+			height: 600,
+			modal: true,
+			open: function() {
+				var dialog_height = parseInt($(this).css("height")) - 50;
+				$("textarea", $(this)).css("height",dialog_height + 'px');
+			},
+			close: function() {
+				$("input[type=text], textarea").each(function() {
+					if ($(this).attr("data-default")) {
+						$(this).trigger("blur");
+					}
+				});
+			},
+			buttons: [
+				{
+					text: "Save as Text",
+					icon: "ui-icon-document",
+					class: "save-button",
+					click: function() {
+						var subject = "Radiogram";
+						if ($("#radiogram_number").val()) { subject += " " + $("#radiogram_number").val(); }
+
+						var filename = subject + " " + $("#date").val() + " " + $("#time").val() + ".txt";
+						filename = prompt("Please enter filename to save as",filename);
+						if (filename == null) { return; }
+
+						var new_file = new File([$("textarea", $(this)).val()],filename,{type: "text/plain"});
+						var download_link = document.createElement('a');
+						download_link.style.display = 'none';
+						download_link.href = URL.createObjectURL(new_file);
+						download_link.download = new_file.name;
+						download_link.onclick = function(e) { $(e.target).remove(); }
+						$("body").append(download_link);
+						download_link.click();
+					}
+				},
+				{
+					text: "Copy Text",
+					icon: "ui-icon-clipboard",
+					class: "copy-button",
+					click: function() {
+						navigator.clipboard.writeText($("pre textarea", $(this)).val());
+					}
+				},
+				/*
+				{
+					text: "Remove Extra Lines",
+					icon: "ui-icon-scissors",
+					click: function() {
+						var html = $("pre textarea",$(this)).val().toString();
+						html = html.replace(/\n\n/g,"\n");
+						$("pre textarea", $(this)).text(html);
+					}
+				},
+				*/
+				{
+					text: "Ok",
+					icon: "ui-icon-check",
+					click: function() {
+						$( this ).dialog( "close" );
+					}
+				}
+			]
+		});
+	});
+
+	$("#hx_link").on("click",function() {
+		$("#hx_dialog").dialog({
+			width: 800,
+			height: 600,
+			modal: true,
+			buttons: [
+				{
+					text: "Ok",
+					icon: "ui-icon-check",
+					click: function() {
+						$( this ).dialog( "close" );
+					}
+				}
+			]
+		});
+	});
+})
+</script>
+</head>
+<body>
+<p>
+<b>PACKET RADIOGRAM</b>
+</p>
+<form>
+<pre>
+<b>Preamble:</b>
+Number: <input type="text" size=10 name="radiogram_number" id="radiogram_number" value="" required>
+    <input type="checkbox" id="is_service"> This is a service message
+Precedence: <select name="precedence" id="precedence"><option>EMERGENCY</option><option value="P">PRIORITY (P)</option><option value="W">WELFARE (W)</option><option value="R" selected>ROUTINE (R)</option></select>
+    <input type="checkbox" id="is_exercise"> This is an exercise
+HX: <input type="checkbox" name="hxa" id="hxa"> HXA <input type="text" size=10 id="hxa_extra" name="hxa_extra">       <a href="#" id="hx_link">(click for more info on handling instructions)</a>
+    <input type="checkbox" name="hxb" id="hxb"> HXB <input type="text" size=10 id="hxb_extra" name="hxb_extra">
+    <input type="checkbox" name="hxc" id="hxc"> HXC
+    <input type="checkbox" name="hxd" id="hxd"> HXD
+    <input type="checkbox" name="hxe" id="hxe"> HXE
+    <input type="checkbox" name="hxf" id="hxf"> HXF <input type="text" size=10 id="hxf_extra" name="hxf_extra">
+    <input type="checkbox" name="hxg" id="hxg"> HXG
+Station of origin: <input type="text" size=20 id="origin_station" value="" style="text-transform: uppercase" data-default="CALL SIGN" required>
+Check: <input type="text" size=10 id="check" value="0" style="text-transform: uppercase" required>
+Place of Origin: <input type="text" size=50 id="origin_place" value="" style="text-transform: uppercase" data-default="CITY ST" required>
+Time Filed: <input type="text" size=20 id="time" value="" style="text-transform: uppercase" data-default="1800Z ">
+Date: <input type="text" size=20 id="date" value="" style="text-transform: uppercase" required>
+
+<b>Address:</b>
+Name: <input type="text" size=50 id="addressee" name="addressee" value="" style="text-transform: uppercase" data-default="FIRST AND LAST NAME" required>    Call Sign: <input type="text" size=20 id="addressee_callsign" name="name_callsign" style="text-transform: uppercase">
+      <input type="text" size=50 id="addressee2" name="addressee2" value="" style="text-transform: uppercase">
+Address: <input type="text" size=50 id="address" name="address" value="" style="text-transform: uppercase">
+         <input type="text" size=50 id="address2" name="address2" value="" style="text-transform: uppercase">
+City/Town: <input type="text" size=50 id="city" name="city" value="" style="text-transform: uppercase" required>
+State: <input type="text" size=10 id="state" name="state" value="" style="text-transform: uppercase" data-default="ST " required>
+Zip: <input type="text" size=20 id="zip" name="zip" value="" style="text-transform: uppercase" data-default="12345 " required>
+Phone: <input type="text" size=15 id="phone" name="phone" value="" data-default="555 555 5555 ">    Ext: <input type="text" size=5 id="ext" name="ext" value="">
+Email: <input type="text" size=100 id="email" name="email" value="" style="text-transform: uppercase">
+Op Note: <input type="text" size=100 id="op_note1" name="op_note1" value="" style="text-transform: uppercase">
+
+<b>Message:</b>
+<textarea name="message" id="message" rows=5 cols=100 style="text-transform: uppercase">
+</textarea>
+
+<b>Signature:</b>
+Signature/Name: <input type="text" size=75 id="signature" name="signature" style="text-transform: uppercase" data-default="NAME, TITLE, CALL SIGN, PHONE, etc" required>
+Op Note: <input type="text" size=100 id="op_note2" name="op_note2" value="" style="text-transform: uppercase">
+</pre>
+
+<br>
+<hr>
+<br>
+
+<input type="button" id="generate" value="Generate/Save as Text">
+&nbsp;
+<input type="button" id="save-data" value="Save Data">
+&nbsp;
+<input type="button" id="load-data" value="Load Data">
+</form>
+
+<br>
+<hr>
+<br>
+
+<p>
+For more information:
+</p>
+
+<p>
+The Standard ARRL message format (Radiogram):<br>
+<a href="https://www.arrl.org/files/file/Public%20Service/MPG104A.pdf" target="_blank">https://www.arrl.org/files/file/Public%20Service/MPG104A.pdf</a>
+</p>
+
+<p>
+Origination, Relay and Delivery of Radiogram-ICS213 Messages from Radio Relay International:<br>
+<a href="https://radiorelay.org/files/training/Instructions-for-Radiogram-ICS213-Relay-and-De.pdf" target="_blank">https://radiorelay.org/files/training/Instructions-for-Radiogram-ICS213-Relay-and-De.pdf</a>
+</p>
+
+<br>
+<hr>
+<br>
+
+<table border=0 width="100%"> 
+	<tr> 
+		<td>Form Concept By: N3MEL</td> 
+		<td>Form Created By: KN4LQN</td> 
+		<td>Ver 1.1</td> 
+	</tr> 
+	<tr> 
+		<td colspan=3 align="center"> 
+			<a href="http://vden.org/pktnet/radiogram.html">Use the latest version of this form online</a>
+		</td> 
+	</tr> 
+</table>
+
+<br>
+
+&nbsp;
+
+<div id="dialog" title="" style="display: none;"></div>
+<input type="file" id="load-file" accept="application/json" style="display: none;">
+
+<div id="hx_dialog" title="Handling Instructions" style="display: none;">
+<p>
+HANDLING INSTRUCTIONS, [HX ], OPTIONAL
+</p>
+
+<p>
+<b>OPTIONAL.</b> Do not use handling instructions unless a particular need is present. Handling instructions are used to instruct the relaying and/or delivering operator to handle the message according to the following codes (Refer to ARRL CD 218, pink card.). If used, handling instructions must stay with the message to the point of delivery.
+</p>
+
+<p>
+<b>* HANDLING INSTRUCTIONS</b> (ARRL, FSD-218 2/91)<br>
+<b>HXA__</b> (Followed by number.) Collect landline delivery authorized by addressee within [....] miles, (If no number, authorization is unlimited.).<br>
+<b>HXB__</b> (Followed by number.) Cancel message if not delivered within [....] hours of filing time; service originating station.<br>
+<b>HXC</b> Report date and time of delivery of the message back to the originating station.<br>
+<b>HXD</b> Report to originating station the identity of station from which received, plus date and time. Report identity of station to which relayed, plus date and time, or if delivered, report date and time and method of delivery (by service message).<br>
+<b>HXE</b> Delivering station get reply from addressee, originate message back.<br>
+<b>HXF__</b> (Followed by a number.) Hold delivery until [date].<br>
+<b>HXG</b> Delivery by mail or landline toll call not required. If toll call or other expense involved, cancel message and send service message back to originating station.<br>
+</p>
+
+<p>
+<b>* MORE THAN ONE HX CODE MAY BE USED.</b> If more than one code is used, they may be combined provided no numbers are to be inserted, otherwise the HX should be repeated, thus:<br>
+NR 27 R HXAC W1AW..., or, NR 27 R HXA50 HXC W1AW...(etc.).
+</p>
+</pre>
+</div>
+
+</body>
+</html>
+
+<!-- for more information: http://arrl-mdc.net/BTHV/BTHV68/BTHVweb.htm -->

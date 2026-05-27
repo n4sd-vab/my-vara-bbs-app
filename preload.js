@@ -31,6 +31,12 @@ contextBridge.exposeInMainWorld("settings", {
         ipcRenderer.on("settings:updated", (_e, data) => callback(data))
 });
 
+// Forms API
+/* contextBridge.exposeInMainWorld("formsAPI", {
+  openICS213Form: () => ipcRenderer.send("open-ics213-form")
+}); */
+
+
 //
 // BBS / MESSAGES API
 //
@@ -59,6 +65,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getMessageByMsgNum: (msgNum) => ipcRenderer.invoke("messages:get-by-msgnum", msgNum),
 
     deleteMessage: (id) => ipcRenderer.invoke("messages:delete", id),
+
+    deleteMultipleMessages: (msgNums) => 
+        ipcRenderer.invoke("messages:delete-multiple", msgNums),
 
     markMessageArchived: (id) => ipcRenderer.invoke("messages:mark-archived", id),
 
@@ -98,6 +107,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     filterBulletins: (category) =>
         ipcRenderer.send("bbs:filter-bulletins", category),
+
+    filterBulletinsSender: (sender) =>
+        ipcRenderer.send("bbs:filter-bulletins-sender", sender),
 
     getBulletinCategories: () =>
         ipcRenderer.invoke("bbs:get-bulletin-categories"),
@@ -222,6 +234,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     onYappSendProgress: (callback) =>
         ipcRenderer.on("yapp:send-progress", (_e, data) => callback(data))
+
 });
 
 console.log("PRELOAD LOADED");

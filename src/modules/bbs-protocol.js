@@ -25,6 +25,8 @@ class BbsProtocol {
     this.wpBuffer = "";
     this.subscriptions = [];
     this.outboxMsg = false;
+    this.commandMode = false;
+    this.deleteQueue = new Set();
 
     this.privateToDownload = [];
     this.bulletinsToDownload = [];
@@ -80,7 +82,7 @@ class BbsProtocol {
           clearInterval(timer);
           resolve(true);
         }
-        if (Date.now() - start > 15000) {
+        if (Date.now() - start > 20000) {
           clearInterval(timer);
           reject(new Error("Timeout waiting for BBS connect"));
         }
@@ -119,6 +121,35 @@ class BbsProtocol {
     this.sendToRenderer("messages:received", { downloaded: toDownload.length });
 
     return { downloaded: toDownload.length };
+  }
+
+  getMessageByNumber(msgNum) {
+    const stmt = this.db.prepare("SELECT * FROM messages WHERE msgNum = ?");
+    return stmt.get(msgNum);
+  }
+
+  handleDelete(msg) {
+    // Queue private messages for batch delete
+    if (msg.type === "private") {
+      this.deleteQueue.add(msg.msgNum);
+    }
+
+    // Update DB
+    this.database.deleteMessage(msg.msgNum);
+
+    // Notify renderer
+    this.sendToRenderer("messages:deleted", msg.msgNum);
+  }
+  // New in V21: Call this periodically or on app exit to flush queued deletes
+  flushDeleteQueue() {
+    if (this.deleteQueue.size === 0) return;
+
+    const nums = Array.from(this.deleteQueue);
+    console.log("Sending batch delete:", nums);
+
+    this.sendBbsCommand(`K ${nums.join(" ")}`);
+
+    this.deleteQueue.clear();
   }
 
   async fullSync() {
@@ -174,7 +205,14 @@ class BbsProtocol {
         // Register waiters BEFORE sending SP
         const wTitle = this.varaConnection.waitForLine(/Enter Title/i);
         const wAddress = this.varaConnection.waitForLine(/Address/i);
-        const sendcmd = msg.type === "P" ? `SP ${msg.recipient}\r` : `SB ${msg.recipient}\r`;
+
+        const prefix = msg.type === "P" ? "SP"
+          : msg.type === "B" ? "SB"
+            : msg.type === "T" ? "ST"
+              : "SP";
+
+        const sendcmd = `${prefix} ${msg.recipient}\r`;
+
 
         this.varaConnection.sendData(sendcmd);
 
@@ -245,45 +283,6 @@ class BbsProtocol {
     }
   }
 
-  /*   finishReadMode() {
-      if (!this.inReadMode) return;
-  
-      console.log("Finishing READ MODE for message", this.currentReadMsgNum);
-  
-      this.inReadMode = false;
-  
-      const body = this.currentReadBody.join("\n");
-      console.log("READ MODE END for message", this.currentReadMsgNum);
-      console.log("READ MODE: accumulated body length =", this.currentReadBody.length);
-  
-      this.database.saveMessageBody(this.currentReadMsgNum, body);
-  
-      this.sendToRenderer("bbs:message-body", {
-        msgNum: this.currentReadMsgNum,
-        body
-      });
-      this.sendToRenderer("bbs:message-read", this.currentReadMsgNum);
-  
-      this.currentReadBody = [];
-      this.readBuffer = "";
-    } */
-
-  /* finishReadMode() {
-    console.log("Finished reading msg", this.readingMsgNum);
-
-    this.inReadMode = false;
-    this.readingMsgNum = null;
-    this.currentReadBody = [];
-    this.readBuffer = "";
-
-    // Start next queued read if any
-    if (this.readQueue.length > 0) {
-      const next = this.readQueue.shift();
-      console.log("Starting next queued read:", next);
-      this.downloadMessage(next);
-    }
-  } */
-
   finishReadMode() {
     console.log("Finished reading msg", this.readingMsgNum);
 
@@ -302,9 +301,10 @@ class BbsProtocol {
   }
 
   // Send command: Onlyused for Direct BBS Command Entry in the UI
-  sendCommand(cmd) {
+  sendBbsCommand(cmd) {
     console.log("MAIN: manual command:", cmd);
 
+    this.commandMode = true;
     this.inReadMode = false;
     this.messageListMode = "none";
     this.currentReadBody = [];
@@ -313,40 +313,10 @@ class BbsProtocol {
     this.sendToRenderer("bbs:clear-message-view");
     this.sendToRenderer("bbs:command-output", cmd + "\r");
 
-    this.commandMode = true;
-
     if (this.varaConnection.dataSocket) {
       this.varaConnection.sendData(cmd + "\r");
     }
   }
-
-  /*   downloadBulletin(msgNum) {
-      this.inReadMode = true;
-      this.commandMode = false;
-      this.readingMsgNum = msgNum;  // new
-      this.currentReadMsgNum = msgNum; 
-      this.currentReadBody = [];
-  
-      this.varaConnection.sendData(`R ${msgNum}\r`);
-    } */
-
-
-  /*   downloadMessage(msgNum) {
-      if (this.inReadMode) {
-        // Already reading something — queue this one
-        this.readQueue.push(msgNum);
-        return;
-      }
-  
-      console.log("Starting read for message", msgNum);
-  
-      this.inReadMode = true;
-      this.readingMsgNum = msgNum;
-      this.currentReadBody = [];
-      this.readBuffer = "";
-  
-      this.varaConnection.sendData(`R ${msgNum}\r`);
-    } */
 
   downloadMessage(msgNum) {
     // Single-click = batch of one
@@ -380,8 +350,6 @@ class BbsProtocol {
     this.varaConnection.sendData(`R ${msgNums.join(" ")}\r`);
   }
 
-
-
   // WhitePages handling
   startWhitePages() {
     this.whitePagesMode = true;
@@ -397,6 +365,7 @@ class BbsProtocol {
       if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
         this.varaConnection.bbsPromptReady = true;
         console.log("DATA: BBS prompt detected");
+        //this.commandMode = false;
       }
     }
 
@@ -422,6 +391,7 @@ class BbsProtocol {
 
     // Read mode
     if (this.inReadMode) {
+      this.commandMode = false
       this.processReadModeData(data);
       return;
     }
@@ -487,10 +457,12 @@ class BbsProtocol {
         // Kick off batch downloads
         if (this.privateToDownload.length > 0) {
           this.queueBatchDownload(this.privateToDownload);
+          //showToast(`Queued ${this.privateToDownload.length} private messages for download`);
         }
 
         if (this.bulletinsToDownload.length > 0) {
           this.queueBatchDownload(this.bulletinsToDownload);
+          //showToast(`Queued ${this.bulletinsToDownload.length} bulletins for download`);
         }
 
         return;
@@ -521,68 +493,6 @@ class BbsProtocol {
 
     this.listBuffer = parts[parts.length - 1];
   }
-
-  /* processReadModeData(data) {
-    const text = data.toString();
-    this.readBuffer += text;
-
-    console.log("READ MODE: received data chunk, length =", text.length);
-
-    const parts = this.readBuffer.split('\r');
-
-    for (let i = 0; i < parts.length - 1; i++) {
-      const raw = parts[i];
-      const line = raw.trim();
-
-      console.log("READ MODE line:", JSON.stringify(line));
-
-      // End of message (explicit footer)
-      const footer = line.match(/^\[End of Message #(\d+)/i);
-      if (footer) {
-        const msgNum = parseInt(footer[1]);
-        console.log("END detected: explicit footer for msg", msgNum);
-
-        this.currentReadBody.push(line);
-        const body = this.currentReadBody.join("\n");
-        this.database.saveMessageBody(msgNum, body);
-
-        // Notify the renderer once the body is written to the DB
-        this.sendToRenderer("bbs:message-body", {
-          msgNum,
-          body
-        });
-        this.sendToRenderer("bbs:message-read", msgNum);
-
-        this.currentReadBody = [];
-        continue;
-      }
-
-      // End of read mode (prompt)
-      if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
-        console.log("END detected: prompt-only line");
-        this.endOfReadMode = true;
-        this.inReadMode = false;
-        this.currentReadMsgNum = null;
-        this.currentReadBody = [];
-        this.readBuffer = "";
-        return;
-      }
-
-      // Start of next message (From:)
-      const nextStart = line.match(/^From:\s+(.+)/i);
-      if (nextStart) {
-        console.log("START of next message (From: line)");
-        this.currentReadBody = [];
-        this.currentReadBody.push(line);
-        continue;
-      }
-
-      // Normal body line
-      this.currentReadBody.push(raw);
-    }
-
-    this.readBuffer = parts[parts.length - 1];
-  } */
 
   processReadModeData(data) {
     if (!this.inReadMode) {

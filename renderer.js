@@ -1,7 +1,7 @@
 window.addEventListener('DOMContentLoaded', async () => {
-    let bbsLinkUp = false;
-    let connected = false;
-    let bbsPromptReady = false;
+    let bbsLinkUp = false;  // Track if RF link to BBS is up (command port)
+    let connected = false;  // Track if VARA is connected (data port)
+    let bbsPromptReady = false; // Track if BBS prompt is ready (after CONNECT, before we can send commands)
     let whitePagesResults = [];
     let currentMessageTab = "private";
     let messageListMode = "local"; // "local" | "bbs"
@@ -11,6 +11,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     let currentBody = [];
 
     let currentDisplayedMsgNum = null;  // Track which message is displayed in the right panel
+
+    let currentBulletinFilter = { type: "none", value: null };
+
+    let multiSelectMode = false;
+    let selectedMsgNums = new Set();
+    let lastSelectedIndex = null;
 
     let isReplyMode = false; // modify the modal for message compose vs message reply
 
@@ -102,7 +108,25 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     console.log("txInput:", txInput);
 
-    
+    function updateTime() {
+        const now = new Date();
+
+        // Format the time string (HH:MM:SS)
+        const timeString = now.toLocaleTimeString([], {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        document.getElementById('clock').textContent = timeString;
+    }
+
+    // Update the clock immediately, then every 1 second
+    updateTime();
+    setInterval(updateTime, 1000);
+
+
     // Append text to command console
     function appendCommand(type, msg) {
         commandConsole.value += `[${type}] ${msg}\n`;
@@ -219,10 +243,43 @@ window.addEventListener('DOMContentLoaded', async () => {
     function attachMessageRowHandlers() {
         const rows = document.querySelectorAll(".msg-row");
 
-        rows.forEach(row => {
+        rows.forEach((row, index) => {
 
-            // LEFT CLICK = open message
-            row.addEventListener("click", async () => {
+            // LEFT CLICK = open message OR multi-select
+            row.addEventListener("click", async (ev) => {
+                const msgNum = row.dataset.msgnum;
+
+                // --- MULTI-SELECT: SHIFT + CLICK (range select) ---
+                if (ev.shiftKey && lastSelectedIndex !== null) {
+                    const start = Math.min(lastSelectedIndex, index);
+                    const end = Math.max(lastSelectedIndex, index);
+
+                    for (let i = start; i <= end; i++) {
+                        const r = rows[i];
+                        r.classList.add("multi-selected");
+                        selectedMsgNums.add(r.dataset.msgnum);
+                    }
+                    return; // do NOT open a message
+                }
+
+                // --- MULTI-SELECT: CTRL/CMD + CLICK (toggle) ---
+                if (ev.ctrlKey || ev.metaKey) {
+                    row.classList.toggle("multi-selected");
+
+                    if (row.classList.contains("multi-selected"))
+                        selectedMsgNums.add(msgNum);
+                    else
+                        selectedMsgNums.delete(msgNum);
+
+                    lastSelectedIndex = index;
+                    return; // do NOT open a message
+                }
+
+                // --- NORMAL CLICK (open message) ---
+                // Clear multi-select state
+                selectedMsgNums.clear();
+                rows.forEach(r => r.classList.remove("multi-selected"));
+
                 // Remove previous selection highlight
                 rows.forEach(r => r.classList.remove("selected"));
                 row.classList.add("selected");
@@ -247,9 +304,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 // Update styling
-                row.dataset.read = "1";     // update read state
-                //row.classList.remove("data-read=0");
-                //row.classList.add("data-read=1");
+                row.dataset.read = "1";
 
                 // Track which message is currently displayed
                 currentDisplayedMsgNum = msg.msgNum;
@@ -269,15 +324,25 @@ window.addEventListener('DOMContentLoaded', async () => {
                 // Render into right pane
                 const viewer = document.getElementById("msgView");
                 viewer.innerHTML = `<pre>${msg.body || "(Fetching message...)"}</pre>`;
-                row.dataset.read = "1";     // update read state
-                //row.classList.remove("data-read=0");
-                //row.classList.add("data-read=1");
+
+                lastSelectedIndex = index;
             });
 
-            // RIGHT CLICK = context menu
+            // RIGHT CLICK = context menu OR bulk delete
             row.addEventListener("contextmenu", async (ev) => {
                 ev.preventDefault();
 
+                // --- SHIFT + RIGHT CLICK = BULK DELETE ---
+                if (ev.shiftKey) {
+                    if (selectedMsgNums.size > 0) {
+                        bulkDeleteSelectedMessages();
+                    } else {
+                        window.showToast("No messages selected for bulk delete");
+                    }
+                    return;
+                }
+
+                // --- NORMAL RIGHT CLICK ---
                 const id = row.dataset.id;
                 const msg = await window.electronAPI.getMessageById(id);
 
@@ -292,7 +357,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         menu.innerHTML = `
                     <div class="menu-item" data-action="open">Open</div>
-                    <div class="menu-item" data-action="reply">Reply</div>
+                    ${currentMessageTab === "private" ? `<div class="menu-item" data-action="reply">Reply</div>` : ""}
                     <div class="menu-item" data-action="archive">Move to Archive</div>
                     <div class="menu-item" data-action="delete">Delete</div>
                     <div class="menu-item" data-action="move">Move to...</div>
@@ -300,8 +365,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                 ? `<div class="menu-item" data-action="filter-category">Filter by Category (${msg.recipient})</div>`
                 : ""
             }
-
-                `;
+                    ${currentMessageTab === "bulletin"
+                ? `<div class="menu-item" data-action="filter-sender">Filter by Sender (${msg.sender})</div>`
+                : ""
+            }
+                    `;
 
         document.body.appendChild(menu);
 
@@ -326,12 +394,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (action === "archive") {
                 await window.electronAPI.markMessageArchived(msg.msgNum);
                 row.classList.add("archived");
-                row.remove();
+                //row.remove();
             }
 
             if (action === "delete") {
                 await window.electronAPI.deleteMessage(msg.msgNum);
-                row.remove();
+                //row.remove(); 
             }
 
             if (action === "move") {
@@ -340,7 +408,15 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
 
             if (action === "filter-category") {
+                currentBulletinFilter = { type: "category", value: msg.recipient };
                 window.electronAPI.filterBulletins(msg.recipient);
+                menu.remove();
+                return;
+            }
+
+            if (action === "filter-sender") {
+                currentBulletinFilter = { type: "sender", value: msg.sender };
+                window.electronAPI.filterBulletinsSender(msg.sender);
                 menu.remove();
                 return;
             }
@@ -355,6 +431,24 @@ window.addEventListener('DOMContentLoaded', async () => {
                 document.removeEventListener("click", handler);
             }
         });
+    }
+
+
+    function applyCurrentBulletinFilter() {
+        console.log("Applying bulletin filter by category:", currentBulletinFilter.value);
+        if (currentBulletinFilter.type === "category") {
+            window.electronAPI.filterBulletins(currentBulletinFilter.value);
+            return;
+        }
+
+        if (currentBulletinFilter.type === "sender") {
+            window.electronAPI.filterBulletinsSender(currentBulletinFilter.value);
+            return;
+        }
+
+        // Default: no filter
+        // currentBulletinFilter = { type: "none", value: null };
+        renderMessageList();
     }
 
     async function renderMessageList(rows) {
@@ -411,6 +505,21 @@ window.addEventListener('DOMContentLoaded', async () => {
         attachMessageRowHandlers();
     }
 
+    function bulkDeleteSelectedMessages() {
+        const nums = Array.from(selectedMsgNums);
+        if (nums.length === 0) return;
+
+        window.electronAPI.deleteMultipleMessages(nums);
+
+        window.showToast(`Deleting ${nums.length} messages…`);
+
+        selectedMsgNums.clear();
+        if (currentBulletinFilter.type !== "none") {
+            applyCurrentBulletinFilter();
+        } else {
+            renderMessageList();
+        }
+    }
 
     function updateMessageRow(msgNum) {
         const row = document.querySelector(`.msg-row[data-msgnum="${msgNum}"]`);
@@ -465,6 +574,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             const allBtn = document.createElement("button");
             allBtn.textContent = "All Categories";
             allBtn.onclick = () => {
+                currentBulletinFilter = { type: "none", value: null };
                 window.electronAPI.filterBulletins("ALL");
                 modal.style.display = "none";
             };
@@ -475,6 +585,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const btn = document.createElement("button");
                 btn.textContent = `${cat.category} (${cat.count})`;
                 btn.onclick = () => {
+                    currentBulletinFilter = { type: "category", value: cat.category };
                     window.electronAPI.filterBulletins(cat.category);
                     modal.style.display = "none";
                 };
@@ -929,22 +1040,27 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     window.electronAPI.onBulletinList((rows) => {
         console.log("Received bulletin rows:", rows.length);
+        showToast(`Received ${rows.length} bulletins`);
         renderMessageList(rows);
     });
 
     // Refresh message list when messages are updated
     window.electronAPI.onMessageDeleted((msgNum) => {
         console.log("Message deleted, refreshing list:", msgNum);
-        renderMessageList();
+        showToast(`Message #${msgNum} deleted`);
+        applyCurrentBulletinFilter();
+        //renderMessageList();
     });
 
     window.electronAPI.onMessageArchived((msgNum) => {
         console.log("Message archived, refreshing list:", msgNum);
+        showToast(`Message #${msgNum} archived`);
         renderMessageList();
     });
 
     window.electronAPI.onMessageDownloaded((msgNum) => {
         console.log("Message downloaded, refreshing list:", msgNum);
+        showToast(`Message #${msgNum} downloaded`);
         renderMessageList();
     });
 
@@ -956,6 +1072,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     window.electronAPI.onMessagesReceived((data) => {
         console.log("Messages received, refreshing list:", data);
+        showToast(`Received ${data.count} messages`);
         renderMessageList();
         //updateMessageRow(msg.msgNum);
     });
@@ -1279,15 +1396,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     // Connect button for VARA TCP connection
     connectBtn.addEventListener('click', async () => {
-            try {
-                await window.vara.connect();
-                appendCommand('info', 'Connect requested');
-            } catch (err) {
-                appendCommand('error', 'Connect failed: ' + err.message);
-            }
-        });
+        try {
+            await window.vara.connect();
+            appendCommand('info', 'Connect requested');
+        } catch (err) {
+            appendCommand('error', 'Connect failed: ' + err.message);
+        }
+    });
 
-    // Command input (Enter to send)
+    // Vara Command input (Enter to send)
     commandInput.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
             const line = commandInput.value.trim();
@@ -1538,14 +1655,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-/*         await saveMessage({
-            msgNum,
-            type,
-            recipient,
-            sender,
-            subject,
-            body
-        }); */
+        /*         await saveMessage({
+                    msgNum,
+                    type,
+                    recipient,
+                    sender,
+                    subject,
+                    body
+                }); */
 
         appendCommand('local', 'TX: Sending message');
 
@@ -1603,6 +1720,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             subject,
             body
         });
+        // reset compose form and close modal
+        composeModal.style.display = "none";
+        composeTo.value = "";
+        composeSubject.value = "";
+        composeBody.value = "";
+        composeType.value = "P";
         composeModal.style.display = "none";
     });
 

@@ -3,13 +3,15 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>VARA BBS Client ver 1.0.18</title>
+    <title>VARA BBS Client ver 1.0.21</title>
     <style>
         body {
             background: #d4dde7;
             font-family: sans-serif;
             margin: 0;
             padding: 0;
+                        user-select: none;
+            -webkit-user-select: none;
         }
 
         table,
@@ -57,6 +59,13 @@
             font-family: monospace;
         }
 
+        #clock {
+            /* font-size: 1rem; */
+            font-weight: bold;
+            color: #0f0;
+        }
+
+
         #log {
             height: 250px;
             overflow-y: auto;
@@ -95,6 +104,12 @@
             /*white-space: break-spaces;
             overflow-x: anywhere; */
         }
+
+        #msgView, 
+        #msgView * {
+            user-select: text;
+            -webkit-user-select: text;
+}
 
         #sendSection {
             flex: 0 0 auto;
@@ -150,6 +165,15 @@
             /* only this scrolls */
         }
 
+        #messageListPanel {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .msg-row,
+        .msg-row * {
+            user-select: none;
+            -webkit-user-select: none;
+        }
         .msg-header pre {
             margin: 0;
             padding: 4px 8px;
@@ -179,6 +203,10 @@
         .msg-row.local {
             color: rgb(25, 34, 160);
             /* cyan-ish for local messages */
+        }
+
+        .msg-row.multi-selected {
+            background-color: #cce5ff;
         }
 
         .msg-tab {
@@ -585,6 +613,7 @@
             <div>PTT: <span class="fixed-width" id="statusPTT">Off</span></div>
             <div>SNR: <span class="fixed-width" id="statusSNR">--</span></div>
             <div>BITRATE: <span class="fixed-width" id="statusRate">--</span></div>
+            <div id="clock">00:00:00</div>
         </div>
 
         <!-- VARA COMMAND CONSOLE (6 lines) -->
@@ -652,6 +681,7 @@
             <select id="composeType" class="modal-input">
                 <option value="P">Private</option>
                 <option value="B">Bulletin</option>
+                <option value="T">NTS</option>
             </select><br>
 
             <label>Message:</label><br>
@@ -909,7 +939,6 @@ Sperry - N4SD
             <button id="aboutClose">Close</button>
         </div>
     </div>
-
 </body>
 
 </html>

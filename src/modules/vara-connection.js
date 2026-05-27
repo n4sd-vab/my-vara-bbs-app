@@ -72,6 +72,8 @@ class VaraConnection {
 
           if (/^WRONG\b/i.test(trimmed)) {
             console.log("CMD: WRONG (modem error)");
+            this.bbsLinkUp = false;  // temp fix for modem errors - treat as link down until we get a CONNECTED again
+            this.bbsPromptReady = false;  // BBS won't be responsive after a modem error, so treat as prompt not ready until we get a CONNECTED again
           }
         }
 

@@ -72,9 +72,9 @@ class DatabaseManager {
     stmt.run(msg);
 
     if (msg.type === "private") {
-      // Mark this message as seen in the latest LM
+      // Mark this message as seen in the latest LP
       this.db.prepare(`
-        UPDATE messages SET seenInLM = 1 WHERE msgNum = ?
+        UPDATE messages SET seenInLP = 1 WHERE msgNum = ?
       `).run(msg.msgNum);
       
     } else if (msg.type === "bulletin") {
@@ -250,6 +250,14 @@ class DatabaseManager {
         ORDER BY msgNum DESC
       `).all(category);
     }
+  }
+
+  getBulletinsBySender(sender) {
+    return this.db.prepare(`
+      SELECT * FROM messages
+      WHERE type='bulletin' AND TRIM(sender) = ?
+      ORDER BY msgNum DESC
+    `).all(sender);
   }
 
   // Address book operations

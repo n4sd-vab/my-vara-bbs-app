@@ -96,6 +96,14 @@ const menuTemplate = [
       }
     ]
   },
+{
+  label: "Forms",
+  submenu: [
+    { label: "ICS 213", click: () => openFormWindow("ics213.html", "ICS‑213 Form") },
+    { label: "Check In", click: () => openFormWindow("check_in.html", "PKTNET Check-In") },
+    { label: "ICS 309", click: () => openFormWindow("form309.html", "ICS‑309 Communications Log") }
+  ]
+},
   {
     label: "Help",
     submenu: [
@@ -144,8 +152,9 @@ function createPreferencesWindow() {
   }
 
   prefWindow = new BrowserWindow({
-    width: 400,
-    height: 500,
+    width: 450,
+    height: 600,
+    autoHideMenuBar: true,   // ⭐ hides the menu bar
     title: "Preferences",
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js')
@@ -157,6 +166,22 @@ function createPreferencesWindow() {
   prefWindow.on('closed', () => {
     prefWindow = null;
   });
+}
+
+function openFormWindow(filename, title) {
+  const win = new BrowserWindow({
+    width: 900,
+    height: 1000,
+    autoHideMenuBar: true,   // ⭐ hides the menu bar
+    modal: false,
+    parent: mainWindow,
+    title,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js")
+    }
+  });
+
+  win.loadFile(`forms/${filename}`);
 }
 
 // App event handlers

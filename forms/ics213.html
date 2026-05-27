@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>ICS-213 General Message</title>
+
+	<!-- version 0.2 -->
+	<meta name="author" content="David Elkins KN4LQN">
+	<meta name="description" content="Simple forms to generate text for use with radio (packet, varac, etc)">
+
+	<script src="src/jquery-3.7.1.min.js"></script>
+	<link rel="stylesheet" href="src/jquery-ui.css">
+	<script src="src/jquery-ui.js"></script>
+
+	<link rel="stylesheet" href="css/forms.css">
+
+<script>
+$(document).ready(function(){
+	function pad(n) { return ("0" + n).slice(-2); }
+
+	var now = new Date();
+	$("#date").val(now.getUTCFullYear() + "-" + pad(now.getUTCMonth()+1) + "-" + pad(now.getUTCDate()));
+	$("#time").val(pad(now.getHours()) + ":" + pad(now.getMinutes()) + "Z");
+
+	$("#save-data").on("click", function() {
+		var form_fields = $("input[type=text], textarea, select", $("form"));
+		var data = {};
+		$(form_fields).each(function(e) {
+			var field = $(this).attr("id");
+			data[field] = $(this).val();
+		});
+		data = JSON.stringify(data);
+		var subject = $("#subject").val();
+		if (!subject) { subject = "ICS-213"; }
+
+		var filename = subject + " " + $("#date").val() + " " + $("#time").val() + ".json";
+		filename = prompt("Please enter filename to save as",filename);
+		if (filename == null) { return; }
+
+		var new_file = new File([data],filename,{type: "application/json"});
+		var download_link = document.createElement('a');
+		download_link.style.display = 'none';
+		download_link.href = URL.createObjectURL(new_file);
+		download_link.download = new_file.name;
+		download_link.onclick = function(e) { $(e.target).remove(); }
+		$("body").append(download_link);
+		download_link.click();
+	});
+	$("#load-data").on("click", function() {
+		$("#load-file").click();
+	});
+	$("#load-file").on("change", function() {
+		var new_file = $(this)[0].files[0];
+		var file_reader = new FileReader();
+		file_reader.onload = function() {
+			var data = {};
+			try {
+				data = JSON.parse(file_reader.result);
+			} catch (error) {
+				// do nothing
+			}
+			for (const [key, value] of Object.entries(data)) { $("#"+key).val(value); }
+		};
+		file_reader.readAsText(new_file);
+	});
+	
+	$("#generate").on("click",function() {
+		$("#dialog").empty();
+	
+		var html = "<pre>";
+		html += '<textarea style="height:100%; width:100%;">';
+		html += "GENERAL MESSAGE (ICS 213)\n";
+		html += "\n";
+		html += "1. Incident Name (Optional): " + $("#incident").val() + "\n";
+		html += "\n";
+		html += "2. To (Name and Position): " + $("#to").val() + "\n";
+		html += "\n";
+		html += "3. From (Name and Position): " + $("#from").val()  + "\n";
+		html += "\n";
+		html += "4. Subject: " + $("#subject").val() + "\n";
+		html += "\n";
+		html += "5. Date: " + $("#date").val() + "\n";
+		html += "\n";
+		html += "6. Time: " + $("#time").val()  + "\n";
+		html += "\n";
+		html += "7. Message: " + $("#message").val() + "\n";
+		html += "\n";
+		html += "8. Approved by: Name: " + $("#sender_name").val() + " Signature: " + $("#sender_signature").val() + " Position/Title: " + $("#sender_position").val() + "\n";
+		html += "\n";
+		html += "9. Reply: " + $("#reply").val() + "\n";
+		html += "\n";
+		html += "10. Replied by: Name: " + $("#reply_name").val() + " Signature: " + $("#reply_signature").val() + " Position/Title: " + $("#reply_position").val() + "\n";
+		html += "</textarea>";
+		html += "</pre>";
+
+		$(html).appendTo($("#dialog"));
+
+		$("#dialog").dialog({
+			width: 800,
+			height: 600,
+			modal: true,
+			open: function() {
+				var dialog_height = parseInt($(this).css("height")) - 50;
+				$("textarea", $(this)).css("height",dialog_height + 'px');
+			},
+			buttons: [
+				{
+					text: "Save as Text",
+					icon: "ui-icon-document",
+					class: "save-button",
+					click: function() {
+						var subject = $("#subject").val();
+						if (!subject) { subject = "ICS-213"; }
+
+						var filename = subject + " " + $("#date").val() + " " + $("#time").val() + ".txt";
+						filename = prompt("Please enter filename to save as",filename);
+						if (filename == null) { return; }
+
+						var new_file = new File([$("textarea", $(this)).val()],filename,{type: "text/plain"});
+						var download_link = document.createElement('a');
+						download_link.style.display = 'none';
+						download_link.href = URL.createObjectURL(new_file);
+						download_link.download = new_file.name;
+						download_link.onclick = function(e) { $(e.target).remove(); }
+						$("body").append(download_link);
+						download_link.click();
+					}
+				},
+				{
+					text: "Copy Text",
+					icon: "ui-icon-clipboard",
+					class: "copy-button",
+					click: function() {
+						navigator.clipboard.writeText($("pre textarea", $(this)).val());
+					}
+				},
+				/*
+				{
+					text: "Remove Extra Lines",
+					icon: "ui-icon-scissors",
+					click: function() {
+						var html = $("pre textarea",$(this)).val().toString();
+						html = html.replace(/\n\n/g,"\n");
+						$("pre textarea", $(this)).text(html);
+					}
+				},
+				*/
+				{
+					text: "Ok",
+					icon: "ui-icon-check",
+					click: function() {
+						$( this ).dialog( "close" );
+					}
+				}
+			]
+		});
+	});
+})
+</script>
+</head>
+<body>
+<p>
+<b>GENERAL MESSAGE (ICS 213)</b>
+</p>
+<form>	
+<pre>
+
+1. Incident Name (Optional): <input type="text" size=100 id="incident" value="">
+
+2. To (Name and Position): <input type="text" size=100 id="to" value="">
+
+3. From (Name and Position): <input type="text" size=100 id="from" value="">
+
+4. Subject: <input type="text" size=100 id="subject" value="">
+
+5. Date: <input type="text" id="date">
+
+6. Time: <input type="text" id="time">
+
+7. Message:
+<textarea rows=4 cols=100 id="message"></textarea>
+
+
+8. Approved by:  Name: <input type="text" id="sender_name" value=""> Signature: <input type="text" id="sender_signature" value=""> Position/Title: <input type="text" id="sender_position" value=""> 
+
+9. Reply:
+<textarea rows=4 cols=100 id="reply"></textarea>
+
+10. Replied by:  Name: <input type="text" id="reply_name" value=""> Signature: <input type="text" id="reply_signature" value=""> Position/Title: <input type="text" id="reply_position" value="">
+</pre>
+
+<br>
+<hr>
+<br>
+
+<input type="button" id="generate" value="Generate/Save as Text">
+&nbsp;
+<input type="button" id="save-data" value="Save Data">
+&nbsp;
+<input type="button" id="load-data" value="Load Data">
+</form>
+
+<br>
+<hr>
+<br>
+
+<table border=0 width="100%"> 
+	<tr> 
+		<td>Form Concept By: N3MEL</td> 
+		<td>Form Created By: KN4LQN</td> 
+		<td>Ver 1.1</td> 
+	</tr> 
+	<tr> 
+		<td colspan=3 align="center"> 
+			<a href="http://vden.org/pktnet/ics213.html">Use the latest version of this form online</a>
+		</td> 
+	</tr> 
+</table>
+
+<br>
+
+&nbsp;
+
+<div id="dialog" title="" style="display: none;"></div>
+<input type="file" id="load-file" accept="application/json" style="display: none;">
+
+</body>
+</html>

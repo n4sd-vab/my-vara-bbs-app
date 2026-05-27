@@ -73,11 +73,33 @@ class IpcHandlers {
       this.database.markMessageArchived(msgNum);
     });
 
+    // Original delete handler
+    /*     ipcMain.handle("messages:delete", (_event, msgNum) => {
+          const changes = this.database.deleteMessage(msgNum);
+          if (changes > 0) {
+            this.sendToRenderer("messages:deleted", msgNum);
+          }
+        }); */
+
+    // New delete handler that routes through bbsProtocol to ensure deleteQueue is updated
     ipcMain.handle("messages:delete", (_event, msgNum) => {
-      const changes = this.database.deleteMessage(msgNum);
-      if (changes > 0) {
-        this.sendToRenderer("messages:deleted", msgNum);
+      // Use the method that actually exists
+      const msg = this.database.getMessageByMsgNum(msgNum);
+      if (!msg) {
+        console.error("messages:delete: message not found:", msgNum);
+        return;
       }
+      // Route delete through bbs-protocol so deleteQueue is updated
+      this.bbsProtocol.handleDelete(msg);
+      return true;
+    });
+
+    ipcMain.handle("messages:delete-multiple", (_event, msgNums) => {
+      for (const num of msgNums) {
+        const msg = this.database.getMessageByMsgNum(num);
+        if (msg) this.bbsProtocol.handleDelete(msg);
+      }
+      return true;
     });
 
     ipcMain.handle("messages:reply-to", (_event, msgNum) => {
@@ -97,10 +119,17 @@ class IpcHandlers {
     });
 
     ipcMain.handle('full-sync', async () => {
+      this.bbsProtocol.flushDeleteQueue();
       return await this.bbsProtocol.fullSync();
     });
 
     ipcMain.handle("bbs:send-outbox", async () => {
+      await this.varaConnection.connect();
+      await this.bbsProtocol.ensureBbsConnected();
+
+      // Pre-flight
+      this.bbsProtocol.flushDeleteQueue();
+
       try {
         await this.bbsProtocol.sendOutboxMessages();
         return true;
@@ -111,12 +140,17 @@ class IpcHandlers {
     });
 
     ipcMain.handle("bbs:send-message", async (_event, msg) => {
+      await this.varaConnection.connect();
+      await this.bbsProtocol.ensureBbsConnected();
+      this.bbsProtocol.flushDeleteQueue();
+
       await this.bbsProtocol.uploadSingleMessage(msg);
       return true;
     });
 
     ipcMain.handle("bbs:receive-messages", async () => {
       console.log("IPC: bbs:receive-messages invoked");
+      this.bbsProtocol.flushDeleteQueue();
       const subs = this.settings.getSetting("subscriptions") || [];
       this.bbsProtocol.setSubscriptions(subs);
       return await this.bbsProtocol.receiveMessages();
@@ -129,9 +163,10 @@ class IpcHandlers {
     ipcMain.handle("bbs:send-receive", async () => {
       await this.varaConnection.connect();
       await this.bbsProtocol.ensureBbsConnected();
-      await this.bbsProtocol.sendOutboxMessages();
+      this.bbsProtocol.flushDeleteQueue();
 
-      this.bbsProtocol.sendCommand("L");
+      await this.bbsProtocol.sendOutboxMessages();
+      this.bbsProtocol.sendBbsCommand("L");
       return true;
     });
 
@@ -149,12 +184,18 @@ class IpcHandlers {
       event.sender.send("bbs:bulletin-list", rows);
     });
 
+    ipcMain.on("bbs:filter-bulletins-sender", (event, sender) => {
+      const rows = this.database.getBulletinsBySender(sender);
+      console.log("Filtering bulletins for sender:", sender, "rows:", rows.length);
+      event.sender.send("bbs:bulletin-list", rows);
+    });
+
     ipcMain.on("bbs:read-message", (event, msgNum) => {
       this.bbsProtocol.readMessage(msgNum);
     });
 
     ipcMain.on("bbs:send-command", (event, cmd) => {
-      this.bbsProtocol.sendCommand(cmd);
+      this.bbsProtocol.sendBbsCommand(cmd);
     });
 
     // Address book handlers

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>PACKET CHECK-IN FORM</title>
+
+	<!-- version 0.1 -->
+	<meta name="author" content="David Elkins KN4LQN">
+	<meta name="description" content="Simple forms to generate text for use with radio (packet, varac, etc)">
+
+	<script src="src/jquery-3.7.1.min.js"></script>
+	<link rel="stylesheet" href="src/jquery-ui.css">
+	<script src="src/jquery-ui.js"></script>
+
+	<link rel="stylesheet" href="css/forms.css">
+
+<script>
+$(document).ready(function(){
+	function pad(n) { return ("0" + n).slice(-2); }
+
+	var now = new Date();
+	$("#datetime").val(now.getFullYear() + "-" + pad(now.getMonth()+1) + "-" + pad(now.getDate()) + " " + pad(now.getHours()) + ":" + pad(now.getMinutes()));
+
+	$("input[type=text], textarea").each(function() {
+		if ($(this).attr("data-default")) {
+			$(this).css("color","gray");
+			$(this).val($(this).attr("data-default"));
+			$(this).on("focus", function() {
+				if ($(this).val() == $(this).attr("data-default")) {
+					$(this).val("");
+					$(this).css("color","black");
+				}
+			});
+			$(this).on("change blur", function() {
+				if($(this).val().length == 0) {
+					$(this).css("color","gray");
+					$(this).val($(this).attr("data-default"));
+				}
+				else if ($(this).val() != $(this).attr("data-default")) {
+					$(this).css("color","black");
+				}
+			});
+		}
+	});
+
+	$("#save-data").on("click", function() {
+		var form_fields = $("input[type=text], textarea, select", $("form"));
+		var data = {};
+		$(form_fields).each(function(e) {
+			var field = $(this).attr("id");
+			if ($(this).attr("data-default")) {
+				if ($(this).val() == $(this).attr("data-default")) {
+					data[field] = "";
+					return;
+				}
+			};
+			data[field] = $(this).val();
+		});
+		data = JSON.stringify(data);
+		var subject = "Packet Check-In";
+
+		var filename = subject + " " + $("#datetime").val() + ".json";
+		filename = prompt("Please enter filename to save as",filename);
+		if (filename == null) { return; }
+
+		var new_file = new File([data],filename,{type: "application/json"});
+		var download_link = document.createElement('a');
+		download_link.style.display = 'none';
+		download_link.href = URL.createObjectURL(new_file);
+		download_link.download = new_file.name;
+		download_link.onclick = function(e) { $(e.target).remove(); }
+		$("body").append(download_link);
+		download_link.click();
+	});
+
+	$("#load-data").on("click", function() {
+		$("#load-file").click();
+	});
+	$("#load-file").on("change", function() {
+		var new_file = $(this)[0].files[0];
+		var file_reader = new FileReader();
+		file_reader.onload = function() {
+			var data = {};
+			try {
+				data = JSON.parse(file_reader.result);
+			} catch (error) {
+				// do nothing
+			}
+			for (const [key, value] of Object.entries(data)) { $("#"+key).val(value); $("#"+key).trigger("change"); }
+		};
+		file_reader.readAsText(new_file);
+
+	});
+
+	$("#generate").on("click",function() {
+		$("#dialog").empty();
+
+		$("input[type=text], textarea").each(function() {
+			if ($(this).attr("data-default")) {
+				if ($(this).val() == $(this).attr("data-default")) {
+					$(this).val("");
+				}
+			}
+		});
+	
+		var html = "<pre>";
+		html += '<textarea style="height:100%; width:100%; min-height: auto;">';
+		html += "PACKET CHECK-IN\n";
+		html += "\n";
+		if ($("#agency").val()) {
+			html += $("#agency").val() + "\n";
+			html += "\n";
+		}
+		html += "1. STATION\n";
+		html += "\n";
+		html += "a. Date/Time: " + $("#datetime").val() + "\n";
+		html += "\n";
+		html += "b. To: " + $("#to").val() + "\n";
+		html += "\n";
+		html += "c. From: " + $("#from").val() + "    d. Station Contact Name: " + $("#contact").val() + "    e. Initial Operator(s): " + $("#operator").val() + "\n";
+		html += "\n";
+		html += "\n";
+		html += "2. SESSION\n";
+		html += "\n";
+		html += "a. Type: " + $("#session_type").val() + "    b. Service: " + $("#service_type").val() + "    c. Band: " + $("#band").val() + "\n";
+		html += "\n";
+		html += "d. Session: " + $("#mode").val() + "\n";
+		html += "\n";
+		html += "\n";
+		html += "3. LOCATION\n";
+		html += "\n";
+		html += "a. Location: " + $("#location").val() + "\n";
+		html += "\n";
+		html += "b. GRID SQUARE: " + $("#gridsquare").val() + "\n";
+		html += "\n";
+		html += "\n";
+		html += "4. COMMENTS: " + $("#comments").val() + "\n";
+		html += "</textarea>\n";
+		html += "</pre>";
+
+		$(html).appendTo($("#dialog"));
+
+		$("#dialog").dialog({
+			width: 800,
+			height: 600,
+			modal: true,
+			open: function() {
+				var dialog_height = parseInt($(this).css("height")) - 50;
+				$("textarea", $(this)).css("height",dialog_height + 'px');
+			},
+			close: function() {
+				$("input[type=text], textarea").each(function() {
+					if ($(this).attr("data-default")) {
+						$(this).trigger("blur");
+					}
+				});
+			},
+			buttons: [
+				{
+					text: "Save as Text",
+					icon: "ui-icon-document",
+					class: "save-button",
+					click: function() {
+						var subject = "Packet Check-In";
+
+						var filename = subject + " " + $("#datetime").val() + ".txt";
+						filename = prompt("Please enter filename to save as",filename);
+						if (filename == null) { return; }
+
+						var new_file = new File([$("textarea", $(this)).val()],filename,{type: "text/plain"});
+						var download_link = document.createElement('a');
+						download_link.style.display = 'none';
+						download_link.href = URL.createObjectURL(new_file);
+						download_link.download = new_file.name;
+						download_link.onclick = function(e) { $(e.target).remove(); }
+						$("body").append(download_link);
+						download_link.click();
+					}
+				},
+				{
+					text: "Copy Text",
+					icon: "ui-icon-clipboard",
+					class: "copy-button",
+					click: function() {
+						navigator.clipboard.writeText($("pre textarea", $(this)).val());
+					}
+				},
+				/*
+				{
+					text: "Remove Extra Lines",
+					icon: "ui-icon-scissors",
+					click: function() {
+						var html = $("pre textarea",$(this)).val().toString();
+						html = html.replace(/\n\n/g,"\n");
+						$("pre textarea", $(this)).val(html);
+					}
+				},
+				*/
+				{
+					text: "Ok",
+					icon: "ui-icon-check",
+					click: function() {
+						$( this ).dialog( "close" );
+					}
+				}
+			]
+		});
+	});
+})
+</script>
+</head>
+<body>
+<p>
+<b>PACKET CHECK-IN FORM</b>
+</p>
+<form>
+<pre>
+Add an agency or group name: <input type="text" name="agency" id="agency" size=50 value="">
+
+1. STATION
+
+a. Date/Time: <input type="text" name="datetime" id="datetime" value="">
+
+b. To: <input type="text" name="to" id="to" size=50 value="">
+
+c. From: <input type="text" name="from" id="from" size=20 value="">    d. Station Contact Name: <input type="text" name="contact" id="contact" value="">    e. Initial Operator(s): <input type="text" name="operator" id="operator" size=50 value="">
+
+
+2. SESSION
+
+a. Type: <select name="session_type" id="session_type"><option selected>EXERCISE</option><option>REAL EVENT</option></select>    b. Service: <select name="service_type" id="service_type"><option selected>AMATEUR</option></select>    c. Band: <select name="band" id="band"><option>AXIP</option><option>HF</option><option selected>VHF</option><option>UHF</option><option>SHF</option></select>
+
+d. Session: <select name="mode" id="mode"><option>AXIP</option><option selected>AX25 Packet</option><option>Pactor</option><option>Robust Packet</option><option>Ardop</option><option>VARA HF</option><option>VARA FM</option><option>Mesh</option></select>
+
+
+3. LOCATION
+
+a. Location: <input type="text" name="location" id="location" size=100 data-default="Example: Hope Hospital, parking lot C near ER entrance">
+
+b. YOUR GRID SQUARE: <input type="text" name="gridsquare" id="gridsquare" size=8 value="">
+
+
+4. COMMENTS: <i>Max Characters 500</i>
+<textarea name="comments" id="comments" rows=6 cols=100 data-default="Such as: On batteries. Need relief in 6 hours. A Brief SitRep. Operators Names. Special notes for next shift.">
+</textarea>
+</pre>
+
+<br>
+<hr>
+<br>
+
+<input type="button" id="generate" value="Generate/Save as Text">
+&nbsp;
+<input type="button" id="save-data" value="Save Data">
+&nbsp;
+<input type="button" id="load-data" value="Load Data">
+</form>
+
+<br>
+<hr>
+<br>
+
+<table border=0 width="100%">
+	<tr>
+		<td>Form Concept By: N3MEL</td>
+		<td>Form Created By: KN4LQN</td>
+		<td>Ver 1.1</td>
+	</tr>
+	<tr>
+		<td colspan=3 align="center">
+			<a href="http://vden.org/pktnet/check_in.html">Use the latest version of this form online</a>
+		</td>
+	</tr>
+</table>
+
+<br>
+
+&nbsp;
+
+<div id="dialog" title="" style="display: none;"></div>
+<input type="file" id="load-file" accept="application/json" style="display: none;">
+
+</body>
+</html>
