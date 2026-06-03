@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, MenuItem} = require('electron');
+const { app, BrowserWindow, Menu, MenuItem, shell} = require('electron');
 const path = require('path');
 
 // Import our modules
@@ -199,3 +199,10 @@ app.on('window-all-closed', () => {
 });
 
 console.log("DB Path:", path.join(app.getPath('userData'), 'bbs.db'));
+
+// Check for new BBS messages every 30 minutes
+/* setInterval(() => {
+    mainWindow.webContents.send("ui:toast", "Auto-checking for new messages…");
+    shell.beep();
+    bbsProtocol.receiveMessages();
+}, 30 * 60 * 1000); */

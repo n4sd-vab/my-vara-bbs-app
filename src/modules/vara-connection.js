@@ -128,7 +128,7 @@ class VaraConnection {
 
   isConnected() {
     return this.cmdSocket && !this.cmdSocket.destroyed &&
-           this.dataSocket && !this.dataSocket.destroyed;
+      this.dataSocket && !this.dataSocket.destroyed;
   }
 
   sendCommand(command) {
@@ -168,8 +168,8 @@ class VaraConnection {
       }, timeout);
     });
   }
-
-  notifyLineListeners(line) {
+  //v.18 or something
+/*   notifyLineListeners(line) {
     console.log("notifyLineListeners GOT:", JSON.stringify(line));
     for (let i = this.lineWaiters.length - 1; i >= 0; i--) {
       const waiter = this.lineWaiters[i];
@@ -178,6 +178,25 @@ class VaraConnection {
         waiter.resolve(line);
         this.lineWaiters.splice(i, 1);
       }
+    }
+  } */
+
+  // V.22 - change to give waiters first chance to consume the line, and if no waiter consumes it, 
+  // then pass to BBS protocol parser    
+  notifyLineListeners(line) {
+    // 1. Give waiters FIRST chance to consume the line
+    for (let i = 0; i < this.lineWaiters.length; i++) {
+      const waiter = this.lineWaiters[i];
+      if (waiter.regex.test(line)) {
+        this.lineWaiters.splice(i, 1);
+        waiter.resolve(line);
+        return;   // <-- IMPORTANT: do NOT pass to parser
+      }
+    }
+
+    // 2. If no waiter consumed it, pass to BBS protocol parser
+    if (this.bbsProtocol && this.bbsProtocol.handleLine) {
+      this.bbsProtocol.handleLine(line);
     }
   }
 

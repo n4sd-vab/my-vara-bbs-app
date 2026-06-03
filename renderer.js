@@ -66,10 +66,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const connectBtn = document.getElementById('connectBtn');
     const connectBbsBtn = document.getElementById('connectBbsBtn');
     const disconnectBbsBtn = document.getElementById('disconnectBbsBtn');
-    /* const listMineBtn = document.getElementById('listMineBtn');
-    const listBullBtn = document.getElementById('listBullBtn');
-    const listWxBtn = document.getElementById('listWxBtn');
-    const listNewBtn = document.getElementById('listNewBtn'); */
+
     const sendBtn = document.getElementById('sendBtn');
     const receiveBtn = document.getElementById('receiveBtn');
     const commandConsole = document.getElementById('commandConsole');
@@ -77,7 +74,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     const rxArea = document.getElementById('rxArea');
     const txInput = document.getElementById('txInput');
 
-    //const statusConn = document.getElementById('statusConn');
     const statusLink = document.getElementById('statusLink');
     const statusBusy = document.getElementById('statusBusy');
     const statusPTT = document.getElementById('statusPTT');
@@ -107,6 +103,30 @@ window.addEventListener('DOMContentLoaded', async () => {
         appSettings.showVaraConsole ? "block" : "none";
 
     console.log("txInput:", txInput);
+
+    const list = document.getElementById("messageList");
+    list.setAttribute("tabindex", "0");
+
+    list.addEventListener("keydown", async (ev) => {
+        if (ev.key !== "Delete") return;
+        ev.preventDefault();
+
+        // MULTI-DELETE → move all selected to trash
+        if (selectedMsgNums.size > 0) {
+            bulkMoveSelectedToTrash();
+            return;
+        }
+
+        // SINGLE DELETE → move selected row to trash
+        const selectedRow = document.querySelector(".msg-row.selected");
+        if (selectedRow) {
+            const msgNum = selectedRow.dataset.msgnum;
+            await window.electronAPI.moveMessageToFolder(msgNum, "trash");
+            return;
+        }
+
+        window.showToast("No message selected");
+    });
 
     function updateTime() {
         const now = new Date();
@@ -156,8 +176,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         msgList.innerHTML = "";
         msgView.innerHTML = "<em>Select a message to view it</em><br>";
     }
-
-
 
     // Parse a message list line to extract message number, 
     // sender, and subject for context menu
@@ -238,10 +256,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-
-
     function attachMessageRowHandlers() {
+        const list = document.getElementById("messageList");
         const rows = document.querySelectorAll(".msg-row");
+
+        list.focus();
 
         rows.forEach((row, index) => {
 
@@ -259,7 +278,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         r.classList.add("multi-selected");
                         selectedMsgNums.add(r.dataset.msgnum);
                     }
-                    return; // do NOT open a message
+                    return;
                 }
 
                 // --- MULTI-SELECT: CTRL/CMD + CLICK (toggle) ---
@@ -272,15 +291,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                         selectedMsgNums.delete(msgNum);
 
                     lastSelectedIndex = index;
-                    return; // do NOT open a message
+                    return;
                 }
 
                 // --- NORMAL CLICK (open message) ---
-                // Clear multi-select state
                 selectedMsgNums.clear();
                 rows.forEach(r => r.classList.remove("multi-selected"));
 
-                // Remove previous selection highlight
                 rows.forEach(r => r.classList.remove("selected"));
                 row.classList.add("selected");
 
@@ -291,7 +308,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 let msg = null;
                 try {
                     msg = await window.electronAPI.getMessageById(id);
-                    console.log("Fetched message from DB:", msg.msgNum, "has body:", !!msg.body);
+                    console.log("Fetched message:", msg.msgNum, "has body:", !!msg.body);
                 } catch (err) {
                     console.error("Failed to load message", err);
                     return;
@@ -303,25 +320,20 @@ window.addEventListener('DOMContentLoaded', async () => {
                     msg.read = 1;
                 }
 
-                // Update styling
                 row.dataset.read = "1";
 
-                // Track which message is currently displayed
                 currentDisplayedMsgNum = msg.msgNum;
-                console.log("Set currentDisplayedMsgNum to:", currentDisplayedMsgNum);
+                console.log("Set currentDisplayedMsgNum:", currentDisplayedMsgNum);
 
                 // If body missing, fetch from BBS
                 if (!msg.body || msg.body.trim() === "") {
-                    console.log("Body missing, requesting from BBS for msgNum:", msg.msgNum);
+                    console.log("Body missing, requesting from BBS:", msg.msgNum);
                     await ensureBbsConnected();
                     window.electronAPI.readMessage(msg.msgNum);
-                } else {
-                    console.log("Body already exists, displaying immediately");
                 }
 
                 window.showToast(`Loading message #${msg.msgNum}…`);
 
-                // Render into right pane
                 const viewer = document.getElementById("msgView");
                 viewer.innerHTML = `<pre>${msg.body || "(Fetching message...)"}</pre>`;
 
@@ -332,10 +344,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             row.addEventListener("contextmenu", async (ev) => {
                 ev.preventDefault();
 
-                // --- SHIFT + RIGHT CLICK = BULK DELETE ---
+                // --- SHIFT + RIGHT CLICK = BULK DELETE (move to trash) ---
                 if (ev.shiftKey) {
                     if (selectedMsgNums.size > 0) {
-                        bulkDeleteSelectedMessages();
+                        bulkMoveSelectedToTrash();   // ⭐ UPDATED
                     } else {
                         window.showToast("No messages selected for bulk delete");
                     }
@@ -343,96 +355,187 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 // --- NORMAL RIGHT CLICK ---
+                row.classList.add("context-active");
+
                 const id = row.dataset.id;
                 const msg = await window.electronAPI.getMessageById(id);
 
-                showMessageContextMenu(row, msg);
+                showMessageContextMenu(row, msg, ev);
             });
         });
     }
 
-    function showMessageContextMenu(row, msg) {
+    async function bulkMoveSelectedToTrash() {
+        if (selectedMsgNums.size === 0) {
+            window.showToast("No messages selected");
+            return;
+        }
+
+        const nums = Array.from(selectedMsgNums);
+
+        for (const msgNum of nums) {
+            await window.electronAPI.moveMessageToFolder(msgNum, "trash");
+        }
+
+        window.showToast(`Moved ${nums.length} messages to Trash`);
+
+        selectedMsgNums.clear();
+
+        refreshCurrentTab();
+    }
+
+    function showMessageContextMenu(row, msg, ev) {
         const menu = document.createElement("div");
         menu.className = "msg-context-menu";
 
+        const isTrash = msg.folder === "trash";
+        const isArchive = msg.folder === "archive";
+
+        // Determine if multi-select is active
+        const multi = selectedMsgNums.size > 1;
+
+        // Build menu HTML
         menu.innerHTML = `
-                    <div class="menu-item" data-action="open">Open</div>
-                    ${currentMessageTab === "private" ? `<div class="menu-item" data-action="reply">Reply</div>` : ""}
-                    <div class="menu-item" data-action="archive">Move to Archive</div>
-                    <div class="menu-item" data-action="delete">Delete</div>
-                    <div class="menu-item" data-action="move">Move to...</div>
-                    ${currentMessageTab === "bulletin"
-                ? `<div class="menu-item" data-action="filter-category">Filter by Category (${msg.recipient})</div>`
-                : ""
-            }
-                    ${currentMessageTab === "bulletin"
-                ? `<div class="menu-item" data-action="filter-sender">Filter by Sender (${msg.sender})</div>`
-                : ""
-            }
-                    `;
+        <div class="menu-item" data-action="open">Open</div>
+
+        ${currentMessageTab === "private" || currentMessageTab === "archived" ? `
+            <div class="menu-item" data-action="reply">Reply</div>` : ""}
+
+        ${!isArchive && !isTrash ? `
+            <div class="menu-item" data-action="archive">Move to Archive</div>` : ""}
+
+        ${!isTrash ? `
+            <div class="menu-item" data-action="delete">Move to Trash</div>` : `
+            <div class="menu-item" data-action="restore">Restore from Trash</div>`}
+
+        <div class="menu-item" data-action="move1">Move to User1</div>
+        <div class="menu-item" data-action="move2">Move to User2</div>
+
+        ${currentMessageTab === "bulletin" ? `
+            <div class="menu-item" data-action="filter-category">Filter by Category (${msg.recipient})</div>` : ""}
+
+        ${currentMessageTab === "bulletin" ? `
+            <div class="menu-item" data-action="filter-sender">Filter by Sender (${msg.sender})</div>` : ""}
+    `;
 
         document.body.appendChild(menu);
 
-        // Position near the row
-        const rect = row.getBoundingClientRect();
-        menu.style.left = rect.right + 5 + "px";
-        menu.style.top = rect.top + "px";
+        // Position under cursor first
+        menu.style.left = ev.pageX + "px";
+        menu.style.top = ev.pageY + "px";
 
-        // Handle clicks
+        // After it's in the DOM, measure it
+        const menuRect = menu.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+
+        // If the menu would go off the bottom, slide it upward
+        if (menuRect.bottom > viewportHeight) {
+            const adjustedTop = ev.pageY - (menuRect.bottom - viewportHeight) - 10;
+            menu.style.top = Math.max(10, adjustedTop) + "px";
+        }
+
+        function closeMenu() {
+            menu.remove();
+            row.classList.remove("context-active");
+        }
+
+        // Close on mouse leave
+        menu.addEventListener("mouseleave", closeMenu);
+
+        // Close on Escape
+        function escHandler(ev) {
+            if (ev.key === "Escape") {
+                closeMenu();
+                document.removeEventListener("keydown", escHandler);
+            }
+        }
+        document.addEventListener("keydown", escHandler);
+
+        // Close on outside click
+        function outsideHandler(ev) {
+            if (!menu.contains(ev.target)) {
+                closeMenu();
+                document.removeEventListener("click", outsideHandler);
+            }
+        }
+        document.addEventListener("click", outsideHandler);
+
+        // Handle menu actions
         menu.addEventListener("click", async (e) => {
             const action = e.target.dataset.action;
             if (!action) return;
 
+            // Determine target messages
+            const targets = multi
+                ? Array.from(selectedMsgNums)
+                : [msg.msgNum];
+
+            // Helper to apply folder move to all targets
+            async function moveAll(folder) {
+                for (const num of targets) {
+                    await window.electronAPI.moveMessageToFolder(num, folder);
+                }
+            }
+
             if (action === "open") {
-                row.click();
+                if (!multi) row.click();
+                closeMenu();
+                return;
             }
 
             if (action === "reply") {
-                openReplyModal(msg);
+                if (!multi) openReplyModal(msg);
+                closeMenu();
+                return;
             }
 
             if (action === "archive") {
-                await window.electronAPI.markMessageArchived(msg.msgNum);
-                row.classList.add("archived");
-                //row.remove();
+                await moveAll("archive");
+                closeMenu();
+                return;
             }
 
             if (action === "delete") {
-                await window.electronAPI.deleteMessage(msg.msgNum);
-                //row.remove(); 
+                await moveAll("trash");
+                closeMenu();
+                return;
             }
 
-            if (action === "move") {
-                // Future: open category picker
-                window.showToast("Move-to-category not implemented yet");
+            if (action === "restore") {
+                await moveAll("inbox");
+                closeMenu();
+                return;
+            }
+
+            if (action === "move1") {
+                await moveAll("user1");
+                closeMenu();
+                return;
+            }
+
+            if (action === "move2") {
+                await moveAll("user2");
+                closeMenu();
+                return;
             }
 
             if (action === "filter-category") {
                 currentBulletinFilter = { type: "category", value: msg.recipient };
                 window.electronAPI.filterBulletins(msg.recipient);
-                menu.remove();
+                closeMenu();
                 return;
             }
 
             if (action === "filter-sender") {
                 currentBulletinFilter = { type: "sender", value: msg.sender };
                 window.electronAPI.filterBulletinsSender(msg.sender);
-                menu.remove();
+                closeMenu();
                 return;
             }
 
-            menu.remove();
-        });
-
-        // Close on outside click
-        document.addEventListener("click", function handler(ev) {
-            if (!menu.contains(ev.target)) {
-                menu.remove();
-                document.removeEventListener("click", handler);
-            }
+            closeMenu();
         });
     }
-
 
     function applyCurrentBulletinFilter() {
         console.log("Applying bulletin filter by category:", currentBulletinFilter.value);
@@ -447,7 +550,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
 
         // Default: no filter
-        // currentBulletinFilter = { type: "none", value: null };
+        currentBulletinFilter = { type: "none", value: null };
         renderMessageList();
     }
 
@@ -457,10 +560,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         let messages = [];
 
         if (rows) {
-            // ⭐ Use filtered rows from main process
             messages = rows;
         } else {
-            // ⭐ Normal mode: load everything
             try {
                 messages = await window.electronAPI.getMessages();
             } catch (err) {
@@ -469,15 +570,19 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-        // ⭐ Filter based on current tab
+        // ⭐ Now you can use the flag safely
         let filtered = messages.filter(m => {
-            if (currentMessageTab === "private") return m.type === "private" && !m.deleted && m.archived === 0;
-            if (currentMessageTab === "bulletin") return m.type === "bulletin" && !m.deleted && m.archived === 0;
-            if (currentMessageTab === "sent") return m.sent === 1 && !m.deleted;
-            if (currentMessageTab === "outbox") return m.outbox === 1 && !m.deleted;
-            if (currentMessageTab === "archived") return m.archived === 1 && !m.deleted;
-            if (currentMessageTab === "user1") return m.type === "user1" && !m.deleted;
-            if (currentMessageTab === "user2") return m.type === "user2" && !m.deleted;
+ 
+                if (currentMessageTab === "private") return m.folder === "inbox" && m.type === "private";
+                if (currentMessageTab === "bulletin") return m.folder === "inbox" && m.type === "bulletin";
+                if (currentMessageTab === "sent") return m.folder === "sent";
+                if (currentMessageTab === "outbox") return m.folder === "outbox";
+                if (currentMessageTab === "archived") return m.folder === "archive";
+                if (currentMessageTab === "user1") return m.folder === "user1";
+                if (currentMessageTab === "user2") return m.folder === "user2";
+   
+
+ 
             return false;
         });
 
@@ -489,8 +594,8 @@ window.addEventListener('DOMContentLoaded', async () => {
             switch (currentFilter) {
                 case "unread": return m.read === 0;
                 case "read": return m.read === 1;
-                case "local": return m.localOnly === 1;
-                case "remote": return m.localOnly === 0;
+                case "local": return m.folder !== "inbox";
+                case "remote": return m.folder === "inbox";
                 default: return true;
             }
         });
@@ -505,20 +610,28 @@ window.addEventListener('DOMContentLoaded', async () => {
         attachMessageRowHandlers();
     }
 
-    function bulkDeleteSelectedMessages() {
-        const nums = Array.from(selectedMsgNums);
-        if (nums.length === 0) return;
+    function refreshCurrentTab() {
 
-        window.electronAPI.deleteMultipleMessages(nums);
+        // ⭐ If we are in the bulletin tab AND a bulletin filter is active,
+        //    reapply the bulletin filter instead of loading everything.
+        if (currentMessageTab === "bulletin" &&
+            currentBulletinFilter &&
+            currentBulletinFilter.type !== "none") {
 
-        window.showToast(`Deleting ${nums.length} messages…`);
+            console.log("Reapplying bulletin filter:", currentBulletinFilter);
 
-        selectedMsgNums.clear();
-        if (currentBulletinFilter.type !== "none") {
             applyCurrentBulletinFilter();
-        } else {
-            renderMessageList();
+            return;
         }
+
+        // ⭐ Default: load all messages and let renderMessageList() filter by tab
+        window.electronAPI.getMessages()
+            .then(rows => {
+                renderMessageList(rows);
+            })
+            .catch(err => {
+                console.error("Failed to refresh current tab:", err);
+            });
     }
 
     function updateMessageRow(msgNum) {
@@ -530,6 +643,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function formatListRow(m) {
         const pad = (str, len) => (str + " ".repeat(len)).slice(0, len);
+        const dflag = (m.downloaded === 1) ? "+" : " ";
 
         return [
             pad(m.msgNum.toString(), 5),
@@ -539,7 +653,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             pad(m.recipient, 7),
             pad(m.at, 7),
             pad(m.sender, 7),
-            m.subject
+            dflag + m.subject
         ].join(" ");
     }
 
@@ -547,19 +661,24 @@ window.addEventListener('DOMContentLoaded', async () => {
         showToast(text);
     });
 
-    showToast = function (text) {
+    window.showToast = function (text) {
+        const container = document.getElementById("toastContainer");
+
         const toast = document.createElement("div");
         toast.className = "toast";
         toast.textContent = text;
-        document.body.appendChild(toast);
 
+        container.appendChild(toast);
+
+        // Animate in
         setTimeout(() => toast.classList.add("visible"), 10);
+
+        // Auto-remove
         setTimeout(() => {
             toast.classList.remove("visible");
             setTimeout(() => toast.remove(), 300);
         }, 2500);
     };
-
 
     function showCategoryPopup() {
         const modal = document.getElementById("categoryModal");
@@ -1038,29 +1157,38 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    window.electronAPI.onBulletinList((rows) => {
-        console.log("Received bulletin rows:", rows.length);
-        showToast(`Received ${rows.length} bulletins`);
+    window.electronAPI.onBulletinList(async (rows) => {
+        await window.electronAPI.syncMessagesWithBbs("bulletin", rows);
         renderMessageList(rows);
     });
+
+    /*     window.electronAPI.onPrivateList(async (rows) => {
+            await window.electronAPI.syncMessagesWithBbs("private", rows);
+            renderMessageList(rows);
+        }); */
 
     // Refresh message list when messages are updated
     window.electronAPI.onMessageDeleted((msgNum) => {
         console.log("Message deleted, refreshing list:", msgNum);
-        showToast(`Message #${msgNum} deleted`);
+        window.showToast(`Message #${msgNum} deleted`);
         applyCurrentBulletinFilter();
         //renderMessageList();
     });
 
-    window.electronAPI.onMessageArchived((msgNum) => {
-        console.log("Message archived, refreshing list:", msgNum);
-        showToast(`Message #${msgNum} archived`);
-        renderMessageList();
+    window.electronAPI.onTrashEmptied((count) => {
+        window.showToast(`Trash emptied (${count} messages deleted)`);
+        refreshCurrentTab();
+    });
+
+    // V.22 New event for when a message is moved to a different folder (e.g. archive, user1, user2)
+    window.electronAPI.onMessageMoved(({ msgNum, folder }) => {
+        window.showToast(`Message #${msgNum} moved to ${folder}`);
+        refreshCurrentTab();
     });
 
     window.electronAPI.onMessageDownloaded((msgNum) => {
         console.log("Message downloaded, refreshing list:", msgNum);
-        showToast(`Message #${msgNum} downloaded`);
+        window.showToast(`Message #${msgNum} downloaded`);
         renderMessageList();
     });
 
@@ -1072,25 +1200,16 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     window.electronAPI.onMessagesReceived((data) => {
         console.log("Messages received, refreshing list:", data);
-        showToast(`Received ${data.count} messages`);
+        window.showToast(`Received ${data.count} messages`);
         renderMessageList();
         //updateMessageRow(msg.msgNum);
     });
 
     window.electronAPI.onMenuItemClicked((label) => {
         if (label === "Filter by Category") {
-            showCategoryPopup();
+            window.showCategoryPopup();
         }
     });
-
-    /*     window.electronAPI.onClearMessageView(() => {
-            document.getElementById("messageBody").textContent = "";
-        });
-    
-        window.electronAPI.onCommandOutput((line) => {
-            const body = document.getElementById("messageBody");
-            body.textContent += line + "\n";
-        }); */
 
     // Clear the right-hand message pane
     window.electronAPI.onClearMessageView(() => {
@@ -1483,58 +1602,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 
     if (bulletinTab) {
+        currentBulletinFilter = { type: "none", value: null };
         bulletinTab.addEventListener("contextmenu", (ev) => {
             ev.preventDefault();
             showCategoryPopup();
         });
     }
-
-    /*  addressBookBtn.addEventListener('click', () => {
-         window.electronAPI.openAddressBookAdd();
-     }); */
-
-    // List Mine (LM) updated to use sendBbsCommand helper which ensures BBS connection and routes through main process
-
-    /*  listMineBtn.addEventListener("click", async () => {
-         // clearMessageWindows();
-         appendCommand("local", "TX: LM");
-         try {
-             await sendBbsCommand("LM");
-         } catch (err) {
-             appendCommand("error", "List Mine failed: " + err.message);
-         }
-     });
- 
-     listBullBtn.addEventListener('click', async () => {
-         // clearMessageWindows();
-         appendCommand('local', 'TX: LB');
-         try {
-             await sendBbsCommand("LB");
-         } catch (err) {
-             appendCommand('error', 'List Bulletins failed: ' + err.message);
-         }
-     });
- 
-     listWxBtn.addEventListener('click', async () => {
-         // clearMessageWindows();
-         appendCommand('local', 'TX: LW');
-         try {
-             await sendBbsCommand("L> WX");
-         } catch (err) {
-             appendCommand('error', 'List Weather failed: ' + err.message);
-         }
-     });
- 
-     // List All (L)
-     listNewBtn.addEventListener('click', async () => {
-         //clearMessageWindows();
-         appendCommand('local', 'TX: L');
-         try {
-             await sendBbsCommand("L");
-         } catch (err) {
-             appendCommand('error', 'List New failed: ' + err.message);
-         }
-     }); */
 
     document.getElementById("sendBtn").addEventListener("click", () => {
         window.electronAPI.sendOutbox();
@@ -1598,6 +1671,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     composeCancelBtn.addEventListener('click', () => {
+        composeTo.value = "";
+        composeSubject.value = "";
+        composeBody.value = "";
+        composeType.value = "P";
         composeModal.style.display = "none";
     });
 

@@ -26,11 +26,7 @@ class DatabaseManager {
         body TEXT,
         downloaded INTEGER DEFAULT 0,
         read INTEGER DEFAULT 0,
-        archived INTEGER DEFAULT 0,
-        deleted INTEGER DEFAULT 0,
-        outbox INTEGER DEFAULT 0,
-        sent INTEGER DEFAULT 0,
-        category TEXT,
+        folder TEXT DEFAULT 'inbox',
         seenInLM INTEGER DEFAULT 0,
         seenInLP INTEGER DEFAULT 0,
         seenInLB INTEGER DEFAULT 0
@@ -59,10 +55,11 @@ class DatabaseManager {
   }
 
   // Message operations
-  upsertMessageListEntry(msg) {
+
+  /* upsertMessageListEntry(msg) {
     const stmt = this.db.prepare(`
-      INSERT INTO messages (msgNum, date, datePosted,typeCode, type, size, recipient, at, sender, subject, downloaded, read, archived, deleted)
-      VALUES (@msgNum, @date, @datePosted, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 0, 0, 0, 0)
+      INSERT INTO messages (msgNum, date, datePosted, typeCode, type, size, recipient, at, sender, subject, folder, downloaded, read)
+      VALUES (@msgNum, @date, @datePosted, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 'inbox', 0, 0)
       ON CONFLICT(msgNum) DO UPDATE SET
         date=@date,
         sender=@sender,
@@ -76,21 +73,74 @@ class DatabaseManager {
       this.db.prepare(`
         UPDATE messages SET seenInLP = 1 WHERE msgNum = ?
       `).run(msg.msgNum);
-      
+
     } else if (msg.type === "bulletin") {
       // Mark this message as seen in the latest LB
       this.db.prepare(`
         UPDATE messages SET seenInLB = 1 WHERE msgNum = ?
       `).run(msg.msgNum);
     }
+  } */
+
+  upsertMessageListEntry(msg) {
+  // Check if message already exists
+  const existing = this.db.prepare(
+    "SELECT * FROM messages WHERE msgNum = ?"
+  ).get(msg.msgNum);
+
+  if (!existing) {
+    // INSERT new message header
+    this.db.prepare(`
+      INSERT INTO messages (
+        msgNum, date, datePosted, typeCode, type,
+        size, recipient, at, sender, subject,
+        folder, downloaded, read,
+        seenInLM, seenInLP, seenInLB
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'inbox', 0, 0, 0, 0, 0)
+    `).run(
+      msg.msgNum, msg.date, msg.datePosted, msg.typeCode, msg.type,
+      msg.size, msg.recipient, msg.at, msg.sender, msg.subject
+    );
+  } else {
+    // UPDATE header fields only — preserve local state
+    this.db.prepare(`
+      UPDATE messages SET
+        date = ?,
+        datePosted = ?,
+        typeCode = ?,
+        type = ?,
+        size = ?,
+        recipient = ?,
+        at = ?,
+        sender = ?,
+        subject = ?
+      WHERE msgNum = ?
+    `).run(
+      msg.date, msg.datePosted, msg.typeCode, msg.type,
+      msg.size, msg.recipient, msg.at, msg.sender, msg.subject,
+      msg.msgNum
+    );
   }
+
+  // Mark seen flags
+  if (msg.type === "private") {
+    this.db.prepare(`
+      UPDATE messages SET seenInLP = 1 WHERE msgNum = ?
+    `).run(msg.msgNum);
+  } else if (msg.type === "bulletin") {
+    this.db.prepare(`
+      UPDATE messages SET seenInLB = 1 WHERE msgNum = ?
+    `).run(msg.msgNum);
+  }
+}
 
   saveMessageBody(msgNum, body) {
     this.db.prepare(`
       UPDATE messages SET body = ?, downloaded = 1 WHERE msgNum = ?
     `).run(body, msgNum);
   }
-
+  // This is used for messages composed in the outbox before sending - 
+  // we want to save them immediately so they persist if the app is closed before sending
   saveOutboxMessage(msg) {
     const date = new Date();
     const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -104,14 +154,14 @@ class DatabaseManager {
     const type = msg.type === "P" ? "private" : "bulletin";
 
     const stmt = this.db.prepare(`
-      INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, outbox, sent)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+      INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, folder)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'outbox')
     `);
     stmt.run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
 
     return true;
   }
-
+  // This is used for messages sent directly from the message view (not via the outbox)
   saveMessage(msg) {
     msg.msgNum = Date.now(); // Temporary msgNum until we get the real one from the BBS after sending
     const date = new Date();
@@ -126,8 +176,8 @@ class DatabaseManager {
     const type = msg.type === "P" ? "private" : "bulletin";
 
     const stmt = this.db.prepare(`
-      INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, sent )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+      INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, folder)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'sent')
     `);
     stmt.run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
 
@@ -140,7 +190,7 @@ class DatabaseManager {
   }
 
   getAllMessages() {
-    return this.db.prepare("SELECT * FROM messages WHERE deleted=0").all();
+    return this.db.prepare("SELECT * FROM messages WHERE folder != 'trash'").all();
   }
 
   getMessageById(id) {
@@ -155,8 +205,15 @@ class DatabaseManager {
     this.db.prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
   }
 
-  markMessageArchived(msgNum) {
-    this.db.prepare("UPDATE messages SET archived = 1 WHERE msgNum = ?").run(msgNum);
+  /*   markMessageArchived(msgNum) {
+      this.db.prepare("UPDATE messages SET folder = 'archive' WHERE msgNum = ?").run(msgNum);
+    } */
+
+  // V.23 Unified folder-move method with UI refresh + event emit
+  moveMessageToFolder(msgNum, folder) {
+    // 1. Update DB
+    this.db.prepare("UPDATE messages SET folder = ? WHERE msgNum = ?")
+      .run(folder, msgNum);
   }
 
   markMessageDownloaded(msgNum) {
@@ -169,19 +226,25 @@ class DatabaseManager {
       console.error("deleteMessage: Invalid msgNum - not a number:", msgNum);
       return;
     }
-    const result = this.db.prepare("UPDATE messages SET deleted = 1 WHERE msgNum = ?").run(numMsg);
+    const result = this.db.prepare("UPDATE messages SET folder = 'trash' WHERE msgNum = ?").run(numMsg);
     return result.changes;
   }
 
+  emptyTrash() {
+    const stmt = this.db.prepare("DELETE FROM messages WHERE folder = 'trash'");
+    const info = stmt.run();
+    return info.changes;   // number of rows deleted
+  }
+
   getOutboxMessages() {
-    return this.db.prepare("SELECT * FROM messages WHERE outbox = 1 AND deleted = 0 AND sent = 0").all();
+    return this.db.prepare("SELECT * FROM messages WHERE folder = 'outbox' ").all();
   }
 
   updateOutboxMessageSent(id, msgNum, size, date, datePosted) {
     console.log("Updating outbox message as sent:", { id, msgNum, size, date, datePosted });
     this.db.prepare(`
       UPDATE messages
-      SET msgNum = ?, size = ?, sent = 1, outbox = 0, date = ?, datePosted = ?
+      SET msgNum = ?, size = ?, folder = 'outbox', date = ?, datePosted = ?
       WHERE id = ?
     `).run(msgNum, size, date, datePosted, id);
   }
@@ -190,7 +253,7 @@ class DatabaseManager {
     console.log("Updating direct message as sent:", { id, msgNum, size, date, datePosted });
     this.db.prepare(`
       UPDATE messages
-      SET msgNum = ?, size = ?, sent = 1, date = ?, datePosted = ?
+      SET msgNum = ?, size = ?, folder = 'sent', date = ?, datePosted = ?
       WHERE id = ?
     `).run(msgNum, size, date, datePosted, id);
   }
@@ -198,30 +261,42 @@ class DatabaseManager {
   getPrivateMessagesForDownload() {
     return this.db.prepare(`
       SELECT msgNum FROM messages
-      WHERE type='private' AND deleted = 0 AND downloaded = 0
+      WHERE type='private' AND folder = 'inbox' AND downloaded = 0
     `).all();
   }
 
+  getPrivateMessagesInTrash() {
+    return this.db.prepare(
+      "SELECT msgNum FROM messages WHERE folder='trash' AND type='private'"
+    ).all();
+  }
+
+  deletePrivateTrashMessages() {
+    this.db.prepare(
+      "DELETE FROM messages WHERE folder='trash' AND type='private'"
+    ).run();
+  }
+
   markPrivateMessagesSeen() {
-    this.db.prepare("UPDATE messages SET seenInLP = 1 WHERE type='private'").run();
+    this.db.prepare("UPDATE messages SET seenInLP = 0 WHERE type='private'").run();
   }
 
   deleteUnseenPrivateMessages() {
     this.db.prepare(`
       UPDATE messages
-      SET deleted = 1
-      WHERE type='private' AND seenInLP = 1 AND downloaded = 0
+      SET folder = 'trash'
+      WHERE type='private' AND seenInLP = 0 AND downloaded = 0
     `).run();
   }
 
   markBulletinMessagesSeen() {
-    this.db.prepare("UPDATE messages SET seenInLB = 1 WHERE type='bulletin'").run();
+    this.db.prepare("UPDATE messages SET seenInLB = 0 WHERE type='bulletin'").run();
   }
 
   deleteUnseenBulletinMessages() {
     this.db.prepare(`
       UPDATE messages
-      SET deleted = 1
+      SET folder = 'trash'
       WHERE type='bulletin' AND seenInLB = 0 AND downloaded = 0
     `).run();
   }
@@ -324,6 +399,84 @@ class DatabaseManager {
   debugAddressBook() {
     return this.db.prepare("SELECT * FROM address_book").all();
   }
+
+  /* syncWithBbs(type, bbsRows) {
+
+    return; // TEMP - disable sync for now while we test other things
+    const bbsNums = new Set(bbsRows.map(r => r.msgNum));
+
+    // Get all local messages of this type
+    const localRows = this.db.prepare(
+      "SELECT msgNum, folder FROM messages WHERE type = ?"
+    ).all(type);
+
+    let deleted = 0;
+
+    for (const row of localRows) {
+      const { msgNum, folder } = row;
+
+      // Skip user-managed folders
+      if (["archive", "user1", "user2", "saved", "sent", "outbox"].includes(folder)) {
+        continue;
+      }
+
+      // Skip trash (handled by K-delete)
+      if (folder === "trash") {
+        continue;
+      }
+
+      // If BBS no longer lists this message → expired → delete locally
+      if (!bbsNums.has(msgNum)) {
+        this.db.prepare("DELETE FROM messages WHERE msgNum = ?").run(msgNum);
+        deleted++;
+      }
+    }
+
+    return deleted;
+  } */
+
+  syncWithBbs(type, bbsRows) {
+
+    // SAFETY: Disabled unless explicitly enabled
+    if (!this.enableSafeSync) {
+      console.log("syncWithBbs skipped (safe mode)");
+      return 0;
+    }
+
+    const bbsNums = new Set(bbsRows.map(r => r.msgNum));
+
+    const localRows = this.db.prepare(
+      "SELECT msgNum, folder FROM messages WHERE type = ?"
+    ).all(type);
+
+    let deleted = 0;
+
+    for (const row of localRows) {
+      const { msgNum, folder } = row;
+
+      // Never touch local-only folders
+      if (["archive", "user1", "user2", "saved", "sent", "outbox"].includes(folder))
+        continue;
+
+      // Never touch trash
+      if (folder === "trash")
+        continue;
+
+      // Never delete bulletins automatically
+      if (type === "bulletin")
+        continue;
+
+      // Private messages only:
+      if (!bbsNums.has(msgNum)) {
+        this.db.prepare("UPDATE messages SET folder='trash' WHERE msgNum=?").run(msgNum);
+        deleted++;
+      }
+    }
+
+    return deleted;
+  }
 }
+
+
 
 module.exports = DatabaseManager;

@@ -11,6 +11,7 @@ class BbsProtocol {
     // State variables
     this.messageListMode = "local";
     this.listBuffer = "";
+    this.killBuffer = "";
     this.inReadMode = false;
     this.currentReadMsgNum = null;
     this.currentReadBody = [];
@@ -26,7 +27,8 @@ class BbsProtocol {
     this.subscriptions = [];
     this.outboxMsg = false;
     this.commandMode = false;
-    this.deleteQueue = new Set();
+    // When true, suppress automatic batch downloads after list retrievals
+    this.deferBatchDownloads = false;
 
     this.privateToDownload = [];
     this.bulletinsToDownload = [];
@@ -35,6 +37,7 @@ class BbsProtocol {
   setSubscriptions(list) {
     this.subscriptions = list;
     console.log("BBS Protocol: Subscriptions updated:", this.subscriptions);
+    //this.sendToRenderer("ui:toast", "Bulletin subscriptions updated: " + this.subscriptions.join(", "));
   }
 
   // Connection and status
@@ -49,8 +52,16 @@ class BbsProtocol {
     const status = this.varaConnection.getBbsStatus();
     if (status.bbsLinkUp && status.bbsPromptReady) return true;
 
+    this.sendToRenderer("ui:toast", "Connecting to BBS...");
+
     this.sendConnectCommand();
-    return await this.waitForBbsReady();
+    const ready = await this.waitForBbsReady();
+
+    if (ready) {
+      this.sendToRenderer("ui:toast", "Connected to BBS");
+    }
+
+    return ready;
   }
 
   sendConnectCommand() {
@@ -90,13 +101,21 @@ class BbsProtocol {
     });
   }
 
+  async waitForPrompt(timeout = 20000) {
+    const promptRegex = /^\s*de\s+[A-Z0-9-]+>\s*$/i;
+    return await this.varaConnection.waitForLine(promptRegex, timeout);
+  }
+
   // Message operations
   async receiveMessages() {
     await this.ensureBbsConnected();
 
+    //await this.sendKillCommandIfNeeded();
+
     // FAST SYNC: only get NEW messages
     this.endOfFileList = false;
     this.messageListMode = "bbs";
+    this.sendToRenderer("ui:toast", "Checking for new messages...");
     this.varaConnection.sendData("L \r");   // NEW messages only
 
     await this.waitForListModeToFinish();
@@ -105,7 +124,8 @@ class BbsProtocol {
     const rows = this.database.getPrivateMessagesForDownload();
     const toDownload = rows.map(r => r.msgNum);
 
-    console.log("Messages to download:", toDownload);
+    console.log("Private messages to download:", toDownload);
+    this.sendToRenderer("ui:toast", `Found ${toDownload.length} new private messages to download`);
 
     if (toDownload.length > 0) {
       this.endOfReadMode = false;
@@ -128,42 +148,28 @@ class BbsProtocol {
     return stmt.get(msgNum);
   }
 
-  handleDelete(msg) {
-    // Queue private messages for batch delete
-    if (msg.type === "private") {
-      this.deleteQueue.add(msg.msgNum);
-    }
-
-    // Update DB
-    this.database.deleteMessage(msg.msgNum);
-
-    // Notify renderer
-    this.sendToRenderer("messages:deleted", msg.msgNum);
-  }
-  // New in V21: Call this periodically or on app exit to flush queued deletes
-  flushDeleteQueue() {
-    if (this.deleteQueue.size === 0) return;
-
-    const nums = Array.from(this.deleteQueue);
-    console.log("Sending batch delete:", nums);
-
-    this.sendBbsCommand(`K ${nums.join(" ")}`);
-
-    this.deleteQueue.clear();
-  }
-
-  async fullSync() {
+  /* async fullSync() {
     await this.ensureBbsConnected();
+
+    //await this.sendKillCommandIfNeeded();
 
     // 1. PRIVATE MESSAGE FULL SYNC (LP)
     this.database.markPrivateMessagesSeen();
 
+    // Defer automatic batch downloads while performing full sync listings
+    this.deferBatchDownloads = true;
+
     this.endOfFileList = false;
     this.messageListMode = "lp";
+    this.sendToRenderer("ui:toast", "Requesting a full list of private messages...");
     this.varaConnection.sendData("LP\r");
 
     await this.waitForListModeToFinish();
 
+    // Capture private list results from LP (only messages not already marked downloaded were collected)
+    const lpPrivateList = Array.isArray(this.privateToDownload) ? this.privateToDownload.slice() : [];
+
+    this.sendToRenderer("ui:toast", "Deleting unseen private messages..."); 
     this.database.deleteUnseenPrivateMessages();
 
     // 2. BULLETIN FULL SYNC (LB)
@@ -175,7 +181,86 @@ class BbsProtocol {
 
     await this.waitForListModeToFinish();
 
+    // Capture bulletin list results from LB
+    const lbBulletinList = Array.isArray(this.bulletinsToDownload) ? this.bulletinsToDownload.slice() : [];
+
     this.database.deleteUnseenBulletinMessages();
+
+    // Re-enable batch downloads after full sync finished
+    this.deferBatchDownloads = false;
+
+    // Now trigger downloads for messages that are not already downloaded
+    try {
+      const privToDownload = [];
+      for (const num of lpPrivateList) {
+        const row = this.database.getMessageByMsgNum(num);
+        if (!row || row.downloaded === 0) privToDownload.push(num);
+      }
+
+      if (privToDownload.length > 0) {
+        this.queueBatchDownload(privToDownload);
+        this.sendToRenderer('ui:toast', `Downloading ${privToDownload.length} private messages`);
+      }
+
+      const bulletsToDownload = [];
+      for (const num of lbBulletinList) {
+        const row = this.database.getMessageByMsgNum(num);
+        if (!row || row.downloaded === 0) bulletsToDownload.push(num);
+      }
+
+      if (bulletsToDownload.length > 0) {
+        this.queueBatchDownload(bulletsToDownload);
+        this.sendToRenderer('ui:toast', `Downloading ${bulletsToDownload.length} bulletins`);
+      }
+    } catch (err) {
+      console.error('fullSync: error triggering downloads', err);
+    }
+
+    return { status: "full-sync-complete" };
+  } */
+
+  async fullSync() {
+    await this.ensureBbsConnected();
+
+    // SAFETY: leave kill disabled while things are stabilizing
+    // await this.sendKillCommandIfNeeded();
+
+    // -----------------------------
+    // 1. PRIVATE MESSAGE FULL SYNC
+    // -----------------------------
+    // Reset seenInLP = 0 for all private messages
+    this.database.markPrivateMessagesSeen();  // your existing function
+
+    this.endOfFileList = false;
+    this.messageListMode = "lp";
+    this.deferBatchDownloads = true;  // don't auto-download during fullSync
+    this.sendToRenderer("ui:toast", "Requesting full private message list...");
+    this.varaConnection.sendData("LP\r");
+
+    await this.waitForListModeToFinish();
+
+    this.sendToRenderer("ui:toast", "Trashing unseen private messages...");
+    this.database.deleteUnseenPrivateMessages();  // your existing function
+
+    // -----------------------------
+    // 2. BULLETIN FULL SYNC
+    // -----------------------------
+    // Reset seenInLB = 0 for all bulletins
+    this.database.markBulletinMessagesSeen();  // your existing function
+
+    this.endOfFileList = false;
+    this.messageListMode = "lb";
+    this.deferBatchDownloads = true;  // still defer during fullSync
+    this.sendToRenderer("ui:toast", "Requesting full bulletin list...");
+    this.varaConnection.sendData("LB\r");
+
+    await this.waitForListModeToFinish();
+
+    this.sendToRenderer("ui:toast", "Trashing unseen bulletins...");
+    this.database.deleteUnseenBulletinMessages();  // your existing function
+
+    // Re-enable normal batch behavior after fullSync
+    this.deferBatchDownloads = false;
 
     return { status: "full-sync-complete" };
   }
@@ -184,7 +269,7 @@ class BbsProtocol {
     const outbox = this.database.getOutboxMessages();
 
     if (outbox.length === 0) {
-      this.sendToRenderer("toast", "Outbox is empty");
+      this.sendToRenderer("ui:toast", "Outbox is empty");
       return;
     }
 
@@ -193,7 +278,32 @@ class BbsProtocol {
       await this.uploadSingleMessage(msg);
     }
 
-    this.sendToRenderer("toast", "Outbox messages sent");
+    this.sendToRenderer("ui:toast", "Outbox messages sent");
+  }
+
+  async sendKillCommandIfNeeded() {
+    const trash = this.database.getPrivateMessagesInTrash();
+    if (trash.length === 0) return false;
+
+    const batchSize = 25;
+
+    for (let i = 0; i < trash.length; i += batchSize) {
+      const batch = trash.slice(i, i + batchSize);
+      const nums = batch.map(m => m.msgNum).join(" ");
+      const cmd = `K ${nums}`;
+
+      console.log("Sending K batch:", cmd);
+
+      this.messageListMode = "kill";
+      this.killBuffer = "";
+
+      this.varaConnection.sendData(cmd + "\r");
+
+      await this.waitForKillToFinish();
+    }
+
+    this.database.deletePrivateTrashMessages();
+    return true;
   }
 
   async uploadSingleMessage(msg) {
@@ -201,6 +311,8 @@ class BbsProtocol {
       try {
         console.log("Uploading message to BBS:", msg);
         await this.ensureBbsConnected();
+
+        //await this.sendKillCommandIfNeeded();
 
         // Register waiters BEFORE sending SP
         const wTitle = this.varaConnection.waitForLine(/Enter Title/i);
@@ -212,7 +324,6 @@ class BbsProtocol {
               : "SP";
 
         const sendcmd = `${prefix} ${msg.recipient}\r`;
-
 
         this.varaConnection.sendData(sendcmd);
 
@@ -296,8 +407,19 @@ class BbsProtocol {
     if (this.readQueue.length > 0) {
       const next = this.readQueue.shift();
       console.log("Starting next queued read:", next);
+      this.sendToRenderer("ui:toast", `Starting download of message ${next}...`);
       this.downloadMessage(next);
     }
+  }
+
+  // Command building
+  buildKillCommand(msgNums) {
+    if (!msgNums || msgNums.length === 0) return null;
+
+    const nums = msgNums.map(m => m.msgNum).join(" ");
+    console.log("Built K command for messages:", nums);
+    //return `K ${nums}`;
+    return
   }
 
   // Send command: Onlyused for Direct BBS Command Entry in the UI
@@ -326,6 +448,7 @@ class BbsProtocol {
   queueBatchDownload(msgNums) {
     if (!msgNums || msgNums.length === 0) return;
 
+    this.sendToRenderer("ui:toast", `Queued ${msgNums.length} messages for download`);
     this.batchQueue.push(msgNums);
     if (!this.batchActive) {
       this.startNextBatch();
@@ -340,6 +463,7 @@ class BbsProtocol {
 
     const msgNums = this.batchQueue.shift();
     console.log("Starting batch read for messages:", msgNums);
+    this.sendToRenderer("ui:toast", `Starting download of message ${msgNums.join(", ")}...`);
 
     this.batchActive = true;
     this.inReadMode = true;
@@ -386,6 +510,11 @@ class BbsProtocol {
       this.privateToDownload = [];
       this.bulletinsToDownload = [];
       this.processListModeData(data);
+      return;
+    }
+
+    if (this.messageListMode === "kill") {
+      this.processKillModeData(data);
       return;
     }
 
@@ -455,14 +584,18 @@ class BbsProtocol {
         this.sendToRenderer("bbs:list-end");
 
         // Kick off batch downloads
-        if (this.privateToDownload.length > 0) {
-          this.queueBatchDownload(this.privateToDownload);
-          //showToast(`Queued ${this.privateToDownload.length} private messages for download`);
-        }
+        if (!this.deferBatchDownloads) {
+          if (this.privateToDownload.length > 0) {
+            this.queueBatchDownload(this.privateToDownload);
+            this.sendToRenderer("ui:toast", `Downloading ${this.privateToDownload.length} private messages`);
+          }
 
-        if (this.bulletinsToDownload.length > 0) {
-          this.queueBatchDownload(this.bulletinsToDownload);
-          //showToast(`Queued ${this.bulletinsToDownload.length} bulletins for download`);
+          if (this.bulletinsToDownload.length > 0) {
+            this.queueBatchDownload(this.bulletinsToDownload);
+            this.sendToRenderer("ui:toast", `Downloading ${this.bulletinsToDownload.length} bulletins`);
+          }
+        } else {
+          console.log("Batch downloads deferred by fullSync");
         }
 
         return;
@@ -562,6 +695,45 @@ class BbsProtocol {
     this.readBuffer = parts[parts.length - 1];
   }
 
+  processKillModeData(data) {
+    const text = data.toString();
+    this.killBuffer += text;
+
+    const parts = this.killBuffer.split('\r');
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      const line = parts[i].trim();
+      if (!line) continue;
+
+      // BPQ: "Message #### not found"
+      if (/^Message\s+\d+\s+not\s+found/i.test(line)) {
+        console.log("KILL:", line);
+        continue;
+      }
+
+      // BPQ: "Message #### killed"
+      if (/^Message\s+\d+\s+killed/i.test(line)) {
+        console.log("KILL:", line);
+        continue;
+      }
+
+      // BPQ prompt → K batch complete
+      if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
+        console.log("KILL: Completed");
+
+        this.messageListMode = "local";
+        this.killBuffer = "";
+
+        if (this.killResolve) {
+          this.killResolve();
+          this.killResolve = null;
+        }
+        return;
+      }
+    }
+
+    this.killBuffer = parts[parts.length - 1];
+  }
 
   processNormalData(data) {
     this.varaConnection.dataBuffer += data.toString();
@@ -601,6 +773,12 @@ class BbsProtocol {
         }
       };
       check();
+    });
+  }
+
+  waitForKillToFinish() {
+    return new Promise(resolve => {
+      this.killResolve = resolve;
     });
   }
 

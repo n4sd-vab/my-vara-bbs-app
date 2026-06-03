@@ -3,15 +3,13 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>VARA BBS Client ver 1.0.21</title>
+    <title>VARA BBS Client ver 1.0.23</title>
     <style>
         body {
             background: #d4dde7;
             font-family: sans-serif;
             margin: 0;
             padding: 0;
-                        user-select: none;
-            -webkit-user-select: none;
         }
 
         table,
@@ -109,7 +107,7 @@
         #msgView * {
             user-select: text;
             -webkit-user-select: text;
-}
+        }
 
         #sendSection {
             flex: 0 0 auto;
@@ -209,6 +207,14 @@
             background-color: #cce5ff;
         }
 
+        .msg-row:hover {
+            background: #00ff22;
+        }
+
+        .msg-row.context-active {
+            background-color: #00ff22;
+        }
+
         .msg-tab {
             padding: 6px 12px;
             cursor: pointer;
@@ -247,10 +253,6 @@
 
         .msgLink:hover {
             color: #5cf;
-        }
-
-        .msg-row:hover {
-            background: #00ff22;
         }
 
         .msgNum {
@@ -535,29 +537,32 @@
             color: #333;
         }
 
-        .toast {
+        #toastContainer {
             position: fixed;
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: #222;
-            color: #fff;
-            padding: 10px 20px;
-            border-radius: 6px;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-            pointer-events: none;
-            z-index: 20000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 9999;
         }
 
-        .toast.show {
-            opacity: 1;
+        .toast {
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
         }
 
         .toast.visible {
             opacity: 1;
+            transform: translateY(0);
         }
-
 
         #yappFileList {
             max-height: 200px;
@@ -591,9 +596,6 @@
             <button id="connectBbsBtn">Connect BBS</button>
             <button id="disconnectBbsBtn" disabled>Disconnect BBS</button> |
             <button id="addressBookBtn">Address Book</button> |
-            <!-- <button id="listBullBtn">List Bulletins</button>
-             <button id="listNewBtn">List New</button>
-            <button id="listWxBtn">List Weather</button> | -->
             <button id="receiveBtn" class="main-btn" title="Download New Message List">Get Messages</button>
             <button id="composeMsgBtn">Compose Message</button>
             <button id="sendBtn" class="main-btn" title="Send Outbox Messages">Send Outbox</button>
@@ -623,7 +625,7 @@
                 style="width:100%; resize:vertical; font-family:monospace;"></textarea>
             <input id="commandInput" placeholder="Enter VARA API commands and press Enter" style="width:100%;" />
         </div>
-        <div id="yappToast" class="toast"></div>
+        <div id="toastContainer"></div>
         <!-- RECEIVED DATA ( About 30 lines) -->
         <div id="mainContent">
             <!-- LEFT: Message List -->
@@ -644,7 +646,7 @@
                 <div id="msg-header" class="msg-header">
                     <pre>Msg#   Date  T  Size  To      @BBS    From       Subject</pre>
                 </div>
-                <div id="messageList" style="padding:8px;"></div>
+                <div id="messageList" style="padding:8px;" tabindex="0"></div>
 
             </div>
             <!-- RIGHT: Message Viewer -->

@@ -66,10 +66,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     deleteMessage: (id) => ipcRenderer.invoke("messages:delete", id),
 
-    deleteMultipleMessages: (msgNums) => 
+    deleteMultipleMessages: (msgNums) =>
         ipcRenderer.invoke("messages:delete-multiple", msgNums),
 
-    markMessageArchived: (id) => ipcRenderer.invoke("messages:mark-archived", id),
+    // markMessageArchived: (id) => ipcRenderer.invoke("messages:mark-archived", id),
+    moveMessageToFolder: (msgNum, folder) =>
+        ipcRenderer.invoke("messages:move-to-folder", msgNum, folder),
 
     markMessageDownloaded: (id) => ipcRenderer.invoke("messages:mark-download", id),
 
@@ -90,6 +92,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onMessagesReceived: (callback) =>
         ipcRenderer.on("messages:received", (_e, data) => callback(data)),
 
+    // New event for message moved to folder
+    onMessageMoved: (callback) =>
+        ipcRenderer.on("messages:moved", (_event, data) => callback(data)),
+
+    emptyTrash: () => ipcRenderer.invoke("messages:empty-trash"),
+
+    onTrashEmptied: (callback) =>
+        ipcRenderer.on("messages:trash-emptied", (_e, count) => callback(count)),
+
+    syncMessagesWithBbs: (type, rows) =>
+        ipcRenderer.invoke("messages:sync-with-bbs", type, rows),
 
     //
     // BBS COMMANDS

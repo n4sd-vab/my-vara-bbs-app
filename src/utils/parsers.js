@@ -78,7 +78,8 @@ function parseListLine(line) {
     recipient: toCall,
     at,
     sender: fromCall,
-    subject
+    subject,
+    downloaded: 0 
   };
 }
 
