@@ -54,34 +54,6 @@ class DatabaseManager {
     `);
   }
 
-  // Message operations
-
-  /* upsertMessageListEntry(msg) {
-    const stmt = this.db.prepare(`
-      INSERT INTO messages (msgNum, date, datePosted, typeCode, type, size, recipient, at, sender, subject, folder, downloaded, read)
-      VALUES (@msgNum, @date, @datePosted, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 'inbox', 0, 0)
-      ON CONFLICT(msgNum) DO UPDATE SET
-        date=@date,
-        sender=@sender,
-        recipient=@recipient,
-        subject=@subject
-    `);
-    stmt.run(msg);
-
-    if (msg.type === "private") {
-      // Mark this message as seen in the latest LP
-      this.db.prepare(`
-        UPDATE messages SET seenInLP = 1 WHERE msgNum = ?
-      `).run(msg.msgNum);
-
-    } else if (msg.type === "bulletin") {
-      // Mark this message as seen in the latest LB
-      this.db.prepare(`
-        UPDATE messages SET seenInLB = 1 WHERE msgNum = ?
-      `).run(msg.msgNum);
-    }
-  } */
-
   upsertMessageListEntry(msg) {
   // Check if message already exists
   const existing = this.db.prepare(
@@ -399,41 +371,6 @@ class DatabaseManager {
   debugAddressBook() {
     return this.db.prepare("SELECT * FROM address_book").all();
   }
-
-  /* syncWithBbs(type, bbsRows) {
-
-    return; // TEMP - disable sync for now while we test other things
-    const bbsNums = new Set(bbsRows.map(r => r.msgNum));
-
-    // Get all local messages of this type
-    const localRows = this.db.prepare(
-      "SELECT msgNum, folder FROM messages WHERE type = ?"
-    ).all(type);
-
-    let deleted = 0;
-
-    for (const row of localRows) {
-      const { msgNum, folder } = row;
-
-      // Skip user-managed folders
-      if (["archive", "user1", "user2", "saved", "sent", "outbox"].includes(folder)) {
-        continue;
-      }
-
-      // Skip trash (handled by K-delete)
-      if (folder === "trash") {
-        continue;
-      }
-
-      // If BBS no longer lists this message → expired → delete locally
-      if (!bbsNums.has(msgNum)) {
-        this.db.prepare("DELETE FROM messages WHERE msgNum = ?").run(msgNum);
-        deleted++;
-      }
-    }
-
-    return deleted;
-  } */
 
   syncWithBbs(type, bbsRows) {
 

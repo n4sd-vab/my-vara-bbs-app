@@ -115,6 +115,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     receiveMessages: () => ipcRenderer.invoke("bbs:receive-messages"),
     readMessage: (msgNum) => ipcRenderer.send("bbs:read-message", msgNum),
 
+    queueBatchDownload: (msgNums) => ipcRenderer.invoke("bbs:queue-batch-download", msgNums),
+
     onMessageBody: (callback) =>
         ipcRenderer.on("bbs:message-body", (_e, msg) => callback(msg)),
 

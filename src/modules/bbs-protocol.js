@@ -19,6 +19,7 @@ class BbsProtocol {
     this.readQueue = [];   // NEW — queue for auto-downloads
     this.batchQueue = [];     // array of arrays of msgNums
     this.batchActive = false;
+    this.batchSize = 10;
     this.endOfFileList = false;
     this.endOfReadMode = false;
     this.whitePagesMode = false;
@@ -59,6 +60,9 @@ class BbsProtocol {
 
     if (ready) {
       this.sendToRenderer("ui:toast", "Connected to BBS");
+      this.batchActive = false;
+      this.inReadMode = false;
+      this.batchQueue = [];
     }
 
     return ready;
@@ -310,6 +314,7 @@ class BbsProtocol {
     return new Promise(async (resolve, reject) => {
       try {
         console.log("Uploading message to BBS:", msg);
+        this.sendToRenderer("ui:toast", `Uploading message to BBS: ${msg.subject}`);
         await this.ensureBbsConnected();
 
         //await this.sendKillCommandIfNeeded();
@@ -449,7 +454,12 @@ class BbsProtocol {
     if (!msgNums || msgNums.length === 0) return;
 
     this.sendToRenderer("ui:toast", `Queued ${msgNums.length} messages for download`);
-    this.batchQueue.push(msgNums);
+
+    for (const num of msgNums) {
+      console.log("Queued for download:", num);
+      this.batchQueue.push(Number(num));
+    }
+
     if (!this.batchActive) {
       this.startNextBatch();
     }
@@ -461,9 +471,22 @@ class BbsProtocol {
       return;
     }
 
-    const msgNums = this.batchQueue.shift();
+    // Build an array of message numbers
+    const msgNums = [];
+
+    while (msgNums.length < this.batchSize && this.batchQueue.length > 0) {
+      msgNums.push(this.batchQueue.shift());
+    }
+
+    // SAFETY CHECK: If somehow empty, stop batching
+    if (msgNums.length === 0) {
+      this.batchActive = false;
+      return;
+    }
+
     console.log("Starting batch read for messages:", msgNums);
-    this.sendToRenderer("ui:toast", `Starting download of message ${msgNums.join(", ")}...`);
+    this.sendToRenderer("ui:refresh-message-lists");
+    this.sendToRenderer("ui:toast", `Starting download of message(s): ${msgNums.join(", ")}`);
 
     this.batchActive = true;
     this.inReadMode = true;
@@ -471,6 +494,10 @@ class BbsProtocol {
     this.readBuffer = "";
     this.currentReadBody = [];
 
+    // Store for parser
+    this.readingMsgNums = msgNums;
+
+    // Send the R command
     this.varaConnection.sendData(`R ${msgNums.join(" ")}\r`);
   }
 
@@ -623,6 +650,7 @@ class BbsProtocol {
 
       }
     }
+    this.sendToRenderer("ui:refresh-message-lists");
 
     this.listBuffer = parts[parts.length - 1];
   }
@@ -665,6 +693,7 @@ class BbsProtocol {
       // 2. Prompt: end of the ENTIRE batch
       if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
         console.log("Prompt detected: end of batch read");
+        this.sendToRenderer("ui:refresh-message-lists");
 
         this.inReadMode = false;
         this.readBuffer = "";

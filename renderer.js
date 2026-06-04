@@ -340,19 +340,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                 lastSelectedIndex = index;
             });
 
-            // RIGHT CLICK = context menu OR bulk delete
+            // RIGHT CLICK = context menu
             row.addEventListener("contextmenu", async (ev) => {
                 ev.preventDefault();
-
-                // --- SHIFT + RIGHT CLICK = BULK DELETE (move to trash) ---
-                if (ev.shiftKey) {
-                    if (selectedMsgNums.size > 0) {
-                        bulkMoveSelectedToTrash();   // ⭐ UPDATED
-                    } else {
-                        window.showToast("No messages selected for bulk delete");
-                    }
-                    return;
-                }
 
                 // --- NORMAL RIGHT CLICK ---
                 row.classList.add("context-active");
@@ -408,6 +398,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             <div class="menu-item" data-action="delete">Move to Trash</div>` : `
             <div class="menu-item" data-action="restore">Restore from Trash</div>`}
 
+        ${!isTrash ? `
+            <div class="menu-item" data-action="download">Download Body${multi ? " (All Selected)" : ""}</div>
+        ` : ""}
+
         <div class="menu-item" data-action="move1">Move to User1</div>
         <div class="menu-item" data-action="move2">Move to User2</div>
 
@@ -416,7 +410,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         ${currentMessageTab === "bulletin" ? `
             <div class="menu-item" data-action="filter-sender">Filter by Sender (${msg.sender})</div>` : ""}
-    `;
+        `;
 
         document.body.appendChild(menu);
 
@@ -507,6 +501,30 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
 
+            if (action === "download") {
+                const toDownload = [];
+
+                for (const num of targets) {
+                    // Fetch metadata for each message
+                    const m = await window.electronAPI.getMessageByMsgNum(num);
+
+                    // Only download if not already downloaded
+                    if (m && m.downloaded === 0) {
+                        toDownload.push(num);
+                    }
+                }
+
+                if (toDownload.length > 0) {
+                    window.electronAPI.queueBatchDownload(toDownload);
+                    window.showToast(`Downloading ${toDownload.length} messages...`);
+                } else {
+                    window.showToast("All selected messages are already downloaded.");
+                }
+
+                closeMenu();
+                return;
+            }
+
             if (action === "move1") {
                 await moveAll("user1");
                 closeMenu();
@@ -572,17 +590,17 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         // ⭐ Now you can use the flag safely
         let filtered = messages.filter(m => {
- 
-                if (currentMessageTab === "private") return m.folder === "inbox" && m.type === "private";
-                if (currentMessageTab === "bulletin") return m.folder === "inbox" && m.type === "bulletin";
-                if (currentMessageTab === "sent") return m.folder === "sent";
-                if (currentMessageTab === "outbox") return m.folder === "outbox";
-                if (currentMessageTab === "archived") return m.folder === "archive";
-                if (currentMessageTab === "user1") return m.folder === "user1";
-                if (currentMessageTab === "user2") return m.folder === "user2";
-   
 
- 
+            if (currentMessageTab === "private") return m.folder === "inbox" && m.type === "private";
+            if (currentMessageTab === "bulletin") return m.folder === "inbox" && m.type === "bulletin";
+            if (currentMessageTab === "sent") return m.folder === "sent";
+            if (currentMessageTab === "outbox") return m.folder === "outbox";
+            if (currentMessageTab === "archived") return m.folder === "archive";
+            if (currentMessageTab === "user1") return m.folder === "user1";
+            if (currentMessageTab === "user2") return m.folder === "user2";
+
+
+
             return false;
         });
 

@@ -53,7 +53,7 @@ class IpcHandlers {
     ipcMain.handle("messages:sync-with-bbs", (event, type, rows) => {
       return this.database.syncWithBbs(type, rows);
     });
-    
+
     ipcMain.handle("messages:get-all", () => {
       return this.database.getAllMessages();
     });
@@ -143,6 +143,12 @@ class IpcHandlers {
       const subs = this.settings.getSetting("subscriptions") || [];
       this.bbsProtocol.setSubscriptions(subs);
       return await this.bbsProtocol.receiveMessages();
+    });
+
+    ipcMain.handle("bbs:queue-batch-download", async (event, msgNums) => {
+      await this.bbsProtocol.ensureBbsConnected();
+      this.bbsProtocol.queueBatchDownload(msgNums);
+      return true
     });
 
     ipcMain.handle("bbs:get-bulletin-categories", () => {
