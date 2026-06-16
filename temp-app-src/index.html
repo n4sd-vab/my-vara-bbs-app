@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>VARA BBS Client ver 1.0.25</title>
+    <style>
+        body {
+            background: #d4dde7;
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        table,
+        th,
+        td {
+            border: 1px solid rgb(97, 97, 97);
+            /* Sets border width, style, and color */
+            border-collapse: collapse;
+            /* Collapses double borders into a single border */
+        }
+
+        th,
+        td {
+            padding: 2px;
+        }
+
+        #commandInput {
+            width: 100%;
+        }
+
+        #emailArea {
+            width: 100%;
+            height: 250px;
+        }
+
+        #appContainer {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            /* or  100% of your window */
+        }
+
+        #toolBar {
+            flex: 0 0 auto;
+            padding: 10px;
+            background: #d4dde7;
+            gap: 10px;
+        }
+
+        #statusBar {
+            gap: 20px;
+            padding: 6px 10px;
+            background: #222;
+            color: #0f0;
+            font-family: monospace;
+        }
+
+        #clock {
+            /* font-size: 1rem; */
+            font-weight: bold;
+            color: #0f0;
+        }
+
+
+        #log {
+            height: 250px;
+            overflow-y: auto;
+            background: #111;
+            color: #0f0;
+            padding: 8px;
+            font-family: monospace;
+        }
+
+        #varaConsoleSection {
+            flex: 0 0 auto;
+        }
+
+        #mainContent {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+            border: 2px solid transparent;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        #msgList {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            /* prevent tabs from scrolling */
+        }
+
+        #msgView pre {
+            flex: 1;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            /*white-space: break-spaces;
+            overflow-x: anywhere; */
+        }
+
+        #msgView,
+        #msgView * {
+            user-select: text;
+            -webkit-user-select: text;
+        }
+
+        #sendSection {
+            flex: 0 0 auto;
+            padding: 10px;
+        }
+
+        .section2 {
+            padding: 5px;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            background-color: #f1f1f1;
+            padding: 5px;
+        }
+
+        .separator {
+            width: 1px;
+            height: 20px;
+            /* Adjust height as needed */
+            background-color: #ccc;
+            margin: 0 5px;
+            /* Space on either side of the separator */
+        }
+
+        .send-row {
+            display: flex;
+            align-items: left;
+            gap: 8px;
+        }
+
+        .send-row label {
+            white-space: nowrap;
+        }
+
+        .send-row input {
+            flex: 1;
+        }
+
+
+        #messageTabs {
+            display: flex;
+            flex: 0 0 auto;
+            background: #ddd;
+            border-bottom: 1px solid #aaa;
+            font-family: monospace;
+        }
+
+        #messageList {
+            flex: 1 1 auto;
+            overflow-y: auto;
+            /* only this scrolls */
+        }
+
+        #messageListPanel {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .msg-row,
+        .msg-row * {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .msg-header pre {
+            margin: 0;
+            padding: 4px 8px;
+            font-weight: bold;
+            background: #333;
+            color: #eee;
+            border-bottom: 1px solid #555;
+        }
+
+        .msg-row pre {
+            margin: 0;
+            padding: 0;
+        }
+
+        .msg-row[data-read="0"] pre {
+            color: #000;
+            /* unread bright */
+            font-weight: bold;
+        }
+
+        .msg-row[data-read="1"] pre {
+            color: #666;
+            /* read dim */
+            font-weight: normal;
+        }
+
+        .msg-row.local {
+            color: rgb(25, 34, 160);
+            /* cyan-ish for local messages */
+        }
+
+        .msg-row.multi-selected {
+            background-color: #cce5ff;
+        }
+
+        .msg-row:hover {
+            background: #00ff22;
+        }
+
+        .msg-row.context-active {
+            background-color: #00ff22;
+        }
+
+        .msg-tab {
+            padding: 6px 12px;
+            cursor: pointer;
+            user-select: none;
+            color: #333;
+        }
+
+        .msg-tab.active {
+            background: #bbb;
+            font-weight: bold;
+        }
+
+        .msg-context-menu {
+            position: absolute;
+            background: #f4f4f5;
+            border: 1px solid #555;
+            padding: 4px;
+            z-index: 9999;
+            width: 150px;
+        }
+
+        .msg-context-menu .menu-item {
+            padding: 6px 10px;
+            cursor: pointer;
+        }
+
+        .msg-context-menu .menu-item:hover {
+            background: #848199;
+        }
+
+        .msgLink {
+            color: #0af;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .msgLink:hover {
+            color: #5cf;
+        }
+
+        .msgNum {
+            color: #1b43f5;
+            text-decoration: underline;
+            margin-right: 6px;
+        }
+
+
+        .msg-filters {
+            display: flex;
+            gap: 6px;
+            padding: 4px 8px;
+            background: #222;
+            border-bottom: 1px solid #444;
+        }
+
+        .msg-filters button {
+            padding: 2px 8px;
+            background: #444;
+            color: #eee;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .msg-filters button:hover {
+            background: #666;
+        }
+
+        .msg-filters button.active {
+            background: #888;
+            font-weight: bold;
+        }
+
+        .category-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .category-list button {
+            text-align: left;
+            padding: 6px 10px;
+            font-size: 14px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background: #f4f4f4;
+            cursor: pointer;
+        }
+
+        .category-list button:hover {
+            background: #e0e0e0;
+        }
+
+        span.fixed-width {
+            display: inline-block;
+            width: 125px;
+        }
+
+        #dataWindow {
+            white-space: pre;
+            font-family: monospace;
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.45);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.front {
+            z-index: 2000;
+        }
+
+        /* Modal window */
+        .modal-window {
+            background: #fff;
+            color: #222;
+            padding: 20px;
+            width: 600px;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
+            font-family: sans-serif;
+
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .modal-window-2 {
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+            color: #222;
+            padding: 20px;
+            width: auto;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
+            font-family: sans-serif;
+        }
+
+        /* Inputs */
+        .modal-input,
+        .modal-textarea {
+            width: 95%;
+            margin-bottom: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .modal-input2 {
+            width: 45%;
+            margin-bottom: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .modal-callSign {
+            text-transform: uppercase;
+        }
+
+        .ab-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            /* spacing between columns */
+            align-items: start;
+        }
+
+        .ab-callsign {
+            color: #4af;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .ab-table-container {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .ab-table {
+            width: auto;
+            border-collapse: collapse;
+            table-layout: fixed;
+            /* required for colgroup to work */
+        }
+
+        .ab-table th,
+        .ab-table td {
+            padding: 4px 6px;
+            border-bottom: 1px solid #444;
+            font-size: 12px;
+        }
+
+        /* Buttons */
+        .modal-buttons {
+            text-align: right;
+            margin-top: 10px;
+        }
+
+        .modal-btn {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 8px;
+            font-size: 14px;
+            transition-duration: 0.4s;
+        }
+
+        .modal-btn.cancel {
+            background: #ccc;
+        }
+
+        .modal-btn.cancel:hover {
+            background: #999;
+        }
+
+        .modal-btn.send {
+            background: #0078ff;
+            color: white;
+        }
+
+        .modal-btn.send:hover {
+            background: #005bb5;
+        }
+
+        .modal-btn.save {
+            background: #0078ff;
+            color: white;
+        }
+
+        .modal-btn.save:hover {
+            background: #005bb5;
+        }
+
+        /* White Pages Modal specific styles */
+        .wp-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            margin-bottom: 12px;
+        }
+
+        .wp-col {
+            flex: 1;
+        }
+
+        .wp-results {
+            width: 100%;
+            /* ← fixes the 25% width issue */
+            height: 200px;
+            border: 1px solid #555;
+            padding: 6px;
+            margin-bottom: 12px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+            background: #333;
+            /* dark gray, not pure black */
+            color: #0f0;
+            /* or #fff if you prefer */
+            box-sizing: border-box;
+            /* ← ensures padding doesn’t shrink width */
+        }
+
+        .wp-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        /* Containers for both Send and Receive */
+        #yappSendProgressSection,
+        #yappRecvProgressSection {
+            width: 100%;
+        }
+
+        #yappSendProgressContainer,
+        #yappRecvProgressContainer {
+            width: 100%;
+            background: transparent;
+            border-radius: 4px;
+            margin-top: 10px;
+            padding: 0;
+            /* stack bars vertically */
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            height: auto;
+        }
+
+        /* The bars now stack vertically; each is a normal block element */
+        #yappSendQueuedBar,
+        #yappSendProgressBar,
+        #yappRecvProgressBar {
+            position: relative;
+            width: 0%;
+            min-width: 2%;
+            height: 14px;
+            border-radius: 4px;
+            transition: width 0.2s linear;
+            box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.06);
+        }
+
+        #yappSendQueuedBar {
+            background: rgba(75, 181, 67, 0.35);
+        }
+
+        /* confirmed (ACKed) bytes (darker) */
+        #yappSendProgressBar,
+        #yappRecvProgressBar {
+            background: #4caf50;
+            /* dark green */
+        }
+
+        /* Text labels */
+        #yappSendProgressText,
+        #yappRecvProgressText {
+            margin-top: 6px;
+            font-size: 14px;
+            color: #111;
+            white-space: pre-line;
+            min-height: 20px;
+        }
+
+        #toastContainer {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 9999;
+        }
+
+        .toast {
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .toast.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        #yappFileList {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #444;
+            padding: 6px;
+            margin-bottom: 10px;
+            background: #ffffff;
+            list-style: none;
+            font-size: 14px;
+        }
+
+        #yappFileList li {
+            padding: 4px 6px;
+            cursor: pointer;
+            border-bottom: 1px solid #333;
+        }
+
+        #yappFileList li:hover {
+            background: #91dd8e;
+        }
+
+        #preferencesModal .modal-window {
+            display: flex;
+            flex-direction: column;
+            align-items: left;
+            padding: 10px;
+            background: #fff;
+            border-radius: 8px;
+            max-height: 80vh;
+            overflow-y: auto;
+            width: 400px;
+        }
+
+        label {
+            display: inline-block;
+            width: 150px;
+            margin-bottom: 10px;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            width: 200px;
+            padding: 5px;
+        }
+
+        .dir-picker {
+            display: flex;
+            align-items: center;
+        }
+
+        .dir-picker input {
+            flex: 1;
+        }
+
+        .dir-picker button {
+            margin-left: 10px;
+            padding: 5px 10px;
+        }
+
+        #yappDirInput {
+            width: 250px;
+        }
+
+        .category-list2 {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+
+        h2 {
+            margin-top: 25px;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 4px;
+            color: #333;
+        }
+
+        #subscriptionList {
+            flex: 1 1 auto;
+            /* ← THIS is now effective */
+            overflow-y: auto;
+            /* ← scrolls properly */
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-width: 100%;
+            /* ← allow full width */
+            padding-right: 6px;
+        }
+
+        #subscriptionList div {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        #subscriptionList label {
+            font-size: 14px;
+            color: #222;
+        }
+
+        #saveSubscriptionsBtn {
+            margin-top: 15px;
+            padding: 8px 14px;
+            font-size: 14px;
+            border-radius: 4px;
+            border: 1px solid #888;
+            background: #e8e8e8;
+            cursor: pointer;
+        }
+
+        #saveSubscriptionsBtn:hover {
+            background: #dcdcdc;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="appContainer">
+
+        <div id="toolBar">
+            <button id="connectBtn">Connect to VARA</button>
+            <button id="disconnectBtn" disabled>Disconnect VARA</button> |
+            <button id="connectBbsBtn">Connect BBS</button>
+            <button id="disconnectBbsBtn" disabled>Disconnect BBS</button> |
+            <button id="addressBookBtn">Address Book</button> |
+            <button id="receiveBtn" class="main-btn" title="Download New Message List">Get Messages</button>
+            <button id="composeMsgBtn">Compose Message</button>
+            <button id="sendBtn" class="main-btn" title="Send Outbox Messages">Send Outbox</button>
+
+        </div>
+        <div id="statusBar" style="
+        display: flex;
+        gap: 20px;
+        padding: 6px 10px;
+        background: #222;
+        color: #0f0;
+        font-family: monospace;
+        ">
+            <div>VARA: <span class="fixed-width" id="statusVara" style="color: #f33;">Disconnected</span></div>
+            <div>LINK: <span class="fixed-width" id="statusLink" style="color: #f33;">Down</span></div>
+            <div>BUSY: <span class="fixed-width" id="statusBusy">Off</span></div>
+            <div>PTT: <span class="fixed-width" id="statusPTT">Off</span></div>
+            <div>SNR: <span class="fixed-width" id="statusSNR">--</span></div>
+            <div>BITRATE: <span class="fixed-width" id="statusRate">--</span></div>
+            <div id="clock">00:00:00</div>
+        </div>
+
+        <!-- VARA COMMAND CONSOLE (6 lines) -->
+        <div id="varaConsoleSection" style="flex: 0 0 auto; overflow-y:auto; padding:8px;">
+            <h4>Vara Command Monitor</h4>
+            <textarea id="commandConsole" rows="6" readonly
+                style="width:100%; resize:vertical; font-family:monospace;"></textarea>
+            <input id="commandInput" placeholder="Enter VARA API commands and press Enter" style="width:100%;" />
+        </div>
+        <div id="toastContainer"></div>
+        <!-- RECEIVED DATA ( About 30 lines) -->
+        <div id="mainContent">
+            <!-- LEFT: Message List -->
+            <div id="msgList" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5);
+                font-family:monospace; padding:0; border: 1px solid black; border-radius: 8px;">
+
+                <!-- ⭐ Tabs go here -->
+                <div id="messageTabs">
+                    <div class="msg-tab active" data-tab="private">Private</div>
+                    <div class="msg-tab" data-tab="bulletin">Bulletins</div>
+                    <div class="msg-tab" data-tab="sent">Sent</div>
+                    <div class="msg-tab" data-tab="outbox">Outbox</div>
+                    <div class="msg-tab" data-tab="archived">Archive</div>
+                    <div class="msg-tab" data-tab="user1">User1</div>
+                    <div class="msg-tab" data-tab="user2">User2</div>
+                </div>
+
+                <div id="msg-header" class="msg-header">
+                    <pre>Msg#   Date  T  Size  To      @BBS    From       Subject</pre>
+                </div>
+                <div id="messageList" style="padding:8px;" tabindex="0"></div>
+
+            </div>
+            <!-- RIGHT: Message Viewer -->
+            <div id="msgView" style="flex:1; overflow-y:auto; background:#ffffff; color:rgb(5, 5, 5);
+                white-space:pre; font-family:monospace; padding: 8px;
+                border: 1px solid black; border-radius: 8px;">
+                Select a message to view it
+            </div>
+
+        </div>
+        <!-- SEND DATA (single line) -->
+        <div id="sendSection" class="send-row">
+            <label for="txInput">Send BBS Command:</label>
+            <input id="txInput" type="text" placeholder="Enter BBS Commands to send" />
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="composeModal" class="modal-overlay">
+        <div class="modal-window" id="composeWindow">
+            <h3>Compose BBS Message</h3>
+
+            <label>To:</label><br>
+
+            <input id="composeTo" list="callsignList" class="modal-callSign">
+            <datalist id="callsignList"></datalist><br><br>
+
+            <label>Subject:</label><br>
+            <input id="composeSubject" class="modal-input"><br>
+
+            <label>Type:</label><br>
+            <select id="composeType" class="modal-input">
+                <option value="P">Private</option>
+                <option value="B">Bulletin</option>
+                <option value="T">NTS</option>
+            </select><br>
+
+            <label>Message:</label><br>
+
+            <div id="includeOriginalContainer"><label>
+                    <input type="checkbox" id="includeOriginalCheckbox">
+                    Include original message
+                </label>
+            </div>
+
+            <br>
+
+            <textarea id="composeBody" rows="12" class="modal-input"></textarea>
+
+            <div style="text-align:right;">
+                <button id="composeCancelBtn" class="modal-btn cancel">Cancel</button>
+                <button id="composeSaveBtn" class="modal-btn save">Save to Outbox</button>
+                <button id="composeSendBtn" class="modal-btn send">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="addressBookModal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>Address Book Add</h3>
+
+            <div class="ab-grid">
+                <div>
+                    <label>Callsign:</label><br>
+                    <input id="addCallsign" class="modal-input">
+                </div>
+
+                <div>
+                    <label>Name:</label><br>
+                    <input id="addName" class="modal-input">
+                </div>
+                <div>
+                    <label>Zipcode:</label><br>
+                    <input id="addZipcode" class="modal-input">
+                </div>
+            </div>
+
+            <label>Home BBS:</label><br>
+            <input id="addHomeBBS" class="modal-input"><br>
+
+            <label>Location:</label><br>
+            <input id="addAddress" class="modal-input"><br>
+
+            <label>Notes:</label><br>
+            <textarea id="addNotes" rows="4" class="modal-input"></textarea>
+
+            <div style="text-align:right;">
+                <button id="addressBookCancelBtn" class="modal-btn cancel">Cancel</button>
+                <button id="addressBookSaveBtn" class="modal-btn save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="addressBookViewModal" class="modal-overlay">
+        <div class="modal-window-2">
+            <h3>Address Book List</h3>
+            <div class="ab-table-container">
+
+                <table class="ab-table">
+                    <colgroup>
+                        <col style="width: 90px;"> <!-- Callsign -->
+                        <col style="width: 90px;"> <!-- Name -->
+                        <col style="width: 200px;"> <!-- Home BBS -->
+                        <col style="width: 90px;"> <!-- Zipcode -->
+                        <col style="width: auto;"> <!-- Location -->
+                        <col style="width: auto;"> <!-- Notes -->
+                        <col style="width: 120px;"> <!-- Actions -->
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th data-column="callsign">Callsign</th>
+                            <th data-column="name">Name</th>
+                            <th data-column="homebbs">Home BBS</th>
+                            <th data-column="zipcode">Zipcode</th>
+                            <th data-column="address">Location</th>
+                            <th data-column="notes">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="addressBookTableBody"></tbody>
+                </table>
+            </div>
+
+            <div style="text-align:right;">
+                <button id="addressBookViewClose" class="modal-btn cancel">Close</button>
+            </div>
+        </div>
+    </div>
+    <div id="whitePagesModal" class="modal-overlay">
+        <div class="modal-window" id="whitePagesWindow">
+
+            <h3>Import Addresses from WhitePages</h3>
+
+            <div class="wp-row">
+                <div class="wp-col">
+                    <label>Query:</label>
+                    <input id="wpQuery" class="modal-input" placeholder="Example:I@ NC">
+                </div>
+
+                <button id="wpRunQueryBtn" class="modal-btn send">Run Query</button>
+            </div>
+
+            <label>Results:</label>
+            <div id="wpResults" class="wp-results">
+                Querying BBS...
+            </div>
+
+            <div class="wp-footer">
+                <button id="wpCancelBtn" class="modal-btn cancel">Close</button>
+                <button id="wpImportBtn" class="modal-btn send" disabled>Import</button>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="categoryModal" class="modal-overlay" style="display:none;">
+        <div class="modal-window">
+            <h3>Select Bulletin Category</h3>
+
+            <div id="categoryList" class="category-list"></div>
+
+            <div class="modal-footer">
+                <button id="categoryCancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="yappReceiveModal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>YAPP - Receive File from BBS</h3>
+            <div id="yappFileListSection">
+                <button type="button" id="yappLoadFileListBtn" class="modal-btn save">Download File List</button>
+
+                <ul id="yappFileList"></ul>
+
+                <label>File Name:</label><br>
+                <input id="fileName" class="modal-input"><br>
+
+                <label>Save to Directory</label>
+                <div class="dir-picker">
+                    <input id="yappModalDirInput" type="text" readonly>
+                    <button id="yappModalDirButton">Browse…</button>
+                </div>
+
+                <div style="text-align:right;">
+                    <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
+                    <button id="yappReceiveStartBtn" class="modal-btn save">Start</button>
+                </div>
+            </div>
+            <div id="yappRecvProgressSection" style="display:none;">
+                <div id="yappRecvProgressContainer">
+                    <div id="yappRecvProgressBar"></div>
+                </div>
+                <div id="yappRecvProgressText">0%</div>
+                <div style="text-align:right;">
+                    <button id="yappReceiveCancelBtn" class="modal-btn cancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="yappSendModal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>YAPP - Send File to BBS</h3>
+
+            <div id="yappPickerSection">
+                <label>Choose File To Send</label>
+                <div class="file-picker">
+                    <input id="yappModalSendFile" type="text" readonly>
+                    <button id="yappModalSendFileButton">Browse…</button>
+                </div>
+
+                <div style="text-align:right;">
+                    <button id="yappSendCancelBtn" class="modal-btn cancel">Cancel</button>
+                    <button id="yappSendStartBtn" class="modal-btn send">Start</button>
+                </div>
+            </div>
+            <div id="yappSendProgressSection" style="display:none;">
+                <div id="yappSendProgressContainer">
+                    <div id="yappSendQueuedBar"></div>
+                    <div id="yappSendProgressBar"></div>
+                </div>
+                <div id="yappSendProgressText"></div>
+            </div>
+            <div id="yappSendErrorSection" style="display: none;">
+                <div id="yappSendErrorMessage"></div>
+                <button id="yappSendErrorCloseBtn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preferences Modal -->
+    <div id="preferencesModal" class="modal-overlay hidden">
+        <div id="preferencesContent" class="modal-window"></div>
+    </div>
+
+
+    <!-- BBS Help Modal -->
+    <div id="bbsHelpModal" class="modal-overlay">
+        <div class="modal-window-2">
+            <h3>G8BPQ BBS Command Reference</h3>
+            <pre class="help-text">
+
+A - Abort Output 
+B - Logoff 
+HOMEBBS - Display or SET your HomeBBS address 
+INFO - Display information about this BBS 
+I CALL - Lookup CALL in WP Allows *CALL CALL* *CALL* wildcards 
+I@ PARAM - Lookup @BBS in WP 
+IZ PARAM - Lookup Zip Codes in WP 
+IH PARAM - Lookup HA elements in WP - eg USA EU etc 
+K - Kill Message(s) 
+K  msg#  
+KM (Kill my read messages) 
+L - List Message(s) -  
+L = List New, LR = List New (Oldest first) 
+LM = List Mine, L> Call, L< Call, L@ = List to, from or at 
+LL num = List msg num, L num-num = List Range 
+LN LY LH LK LF L$ LD = List Message with corresponding Status 
+LB LP LT = List Message with corresponding Type 
+LC = List TO fields of all active bulletins 
+You can combine most selections eg LMP, LMN LB< G8BPQ 
+LISTFILES or FILES - List files available for download 
+N Name - Set Your Name 
+NODE - Return to Node 
+OP n - Set Page Length (Output will pause every n lines) 
+PASS Password - Set BBS Password 
+Q QTH - Set Your QTH 
+R - Read Message(s)  
+R num 
+RM (Read new messages to me),  
+RMR (RM oldest first) 
+READ Name - Read File 
+S - Send Message 
+S or SP Send Personal,  
+SB Send Bull,  
+ST Send NTS,  
+SR Num - Send Reply,  
+SC Num - Send Copy 
+X - Toggle Expert Mode 
+YAPP - Download file from BBS using YAPP protocol
+
+            </pre>
+            <button id="bbsHelpClose">Close</button>
+        </div>
+    </div>
+
+    <div id="aboutModal" class="modal-overlay">
+        <div class="modal-window-2">
+            <h3>About My Vara BBS App</h3>
+            <pre class="help-text">
+This is my Electron app to connect to a G8BPQ Packet BBS 
+via VARA FM. It is built using Electron and the VARA API, 
+and is designed to provide a user-friendly interface for 
+accessing BBS features like message lists, reading messages, 
+sending messages, YAPP file transfers, and an address book.
+
+Still much to do. Suggestions welcome.
+
+Sperry - N4SD
+            </pre>
+            <button id="aboutClose">Close</button>
+        </div>
+    </div>
+
+    <!-- Preferences Template (outside the modal) -->
+    <template id="preferencesTemplate">
+        <!-- All your Preferences HTML goes here -->
+
+        <h2>Preferences</h2>
+
+        <div><label align="center">My Call:</label><input id="myCall"></div>
+
+        <div><label align="center">BBS Call:</label><input id="bbsCall"></div>
+
+        <div><label align="center">Node Call:</label><input id="nodeCall"></div>
+
+        <div><label align="center">Digi 1:</label><input id="digi1"></div>
+
+        <div><label align="center">Digi 2:</label><input id="digi2"></div><br>
+        <br>
+        <div><label align="center">VARA IP:</label><input id="varaIP"></div>
+
+        <div><label align="center">VARA Cmd Port:</label><input id="varaCmdPort"></div>
+
+        <div><label align="center">VARA Data Port:</label><input id="varaDataPort"></div>
+        <br>
+        <div><label>YAPP Receive Directory</label></div>
+        <div class="dir-picker">
+            <input id="yappDirInput" type="text" readonly>
+            <button id="yappDirButton">Browse…</button>
+        </div>
+        <br>
+        <button id="saveBtn">Save</button>
+        <br>
+        <h2>Bulletin Subscriptions</h2>
+        <div id="subscriptionList" class="category-list2"></div>
+        <button id="saveSubscriptionsBtn">Save Subscriptions</button>
+    </template>
+
+    <!-- Insert renderer.js here -->
+    <script src="renderer.js"></script>
+
+</body>
+
+</html>

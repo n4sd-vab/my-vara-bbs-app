@@ -1490,8 +1490,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById("yappSendStartBtn").addEventListener("click", async () => {
         await ensureBbsConnected();
         const filePath = document.getElementById("yappModalSendFile").value;
-        
-        console.log("Starting YAPP send for file:", filePath);
 
         if (!filePath) {
             appendCommand("error", "No file selected for YAPP send");

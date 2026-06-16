@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>PACKET RADIO SEVERE WEATHER REPORT</title>
+
+	<!-- version 0.1 -->
+	<meta name="author" content="David Elkins KN4LQN">
+	<meta name="description" content="Simple forms to generate text for use with radio (packet, varac, etc)">
+
+	<script src="src/jquery-3.7.1.min.js"></script>
+	<link rel="stylesheet" href="src/jquery-ui.css">
+	<script src="src/jquery-ui.js"></script>
+
+	<link rel="stylesheet" href="css/forms.css">
+
+<script>
+$(document).ready(function(){
+	function pad(n) { return ("0" + n).slice(-2); }
+
+	var now = new Date();
+	var datetime = now.getFullYear() + "-" + pad(now.getMonth()+1) + "-" + pad(now.getDate());
+	datetime += " " + pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+	$("#datetime").val(datetime);
+
+	$("#units").on("change", function() {
+		if ($(this).val() == "Metric") {
+			$("#high_wind_units").text("KM/h");
+			$("#snow_units").text("centimeters");
+			$("#freezing_rain_units").text("millimeters");
+			$("#heavy_rain_units").text("millimeters");
+		} else {
+			$("#high_wind_units").text("MPH");
+			$("#snow_units").text("inches");
+			$("#freezing_rain_units").text("inches");
+			$("#heavy_rain_units").text("inches");
+		}
+	});
+
+	$("#save-data").on("click", function() {
+		var form_fields = $("input[type=text], textarea, select", $("form"));
+		var data = {};
+		$(form_fields).each(function(e) {
+			var field = $(this).attr("id");
+			data[field] = $(this).val();
+		});
+		data = JSON.stringify(data);
+		var subject = $("#subject").val();
+		if (!subject) { subject = "Severe Weather Report"; }
+
+		var filename = subject + " " + $("#datetime").val() + ".json";
+		filename = prompt("Please enter filename to save as",filename);
+		if (filename == null) { return; }
+
+		var new_file = new File([data],filename,{type: "application/json"});
+		var download_link = document.createElement('a');
+		download_link.style.display = 'none';
+		download_link.href = URL.createObjectURL(new_file);
+		download_link.download = new_file.name;
+		download_link.onclick = function(e) { $(e.target).remove(); }
+		$("body").append(download_link);
+		download_link.click();
+	});
+	$("#load-data").on("click", function() {
+		$("#load-file").click();
+	});
+	$("#load-file").on("change", function() {
+		var new_file = $(this)[0].files[0];
+		var file_reader = new FileReader();
+		file_reader.onload = function() {
+			var data = {};
+			try {
+				data = JSON.parse(file_reader.result);
+			} catch (error) {
+				// do nothing
+			}
+			for (const [key, value] of Object.entries(data)) { $("#"+key).val(value); }
+
+			$("#units").trigger("change");
+		};
+		file_reader.readAsText(new_file);
+	});
+	
+	$("#generate").on("click",function() {
+		$("#dialog").empty();
+	
+		var html = "<pre>";
+		html += '<textarea style="height:100%; width:100%;">';
+		html += "PACKET RADIO SEVERE WEATHER REPORT\n";
+		html += "\n";
+		html += "1. Sender: " + $("#sender").val() + "\n";
+		html += "\n";
+		html += "2. Report Date/Time (local): " + $("#datetime").val() + "\n";
+		html += "\n";
+		html += "3. Report Version: " + $("#report_version").val() + "\n";
+		html += "\n";
+		html += "4. Reporting Party Name: " + $("#reporting_name").val() + "\n";
+		html += "\n";
+		html += "5. Reporting Party Phone Number: " + $("#reporting_phone").val() + "\n";
+		html += "\n";
+		html += "6. Reporting Party Email Address: " + $("#reporting_email").val() + "\n";
+		html += "\n";
+		html += "EVENT AREA\n";
+		html += "\n";
+		html += "7. City: " + $("#city").val() + "\n";
+		html += "\n";
+		html += "8. State/Province/Region: " + $("#state").val() + "\n";
+		html += "\n";
+		html += "9. County: " + $("#county").val() + "\n";
+		html += "\n";
+		html += "10. Other: " + $("#other").val() + "\n";
+		html += "\n";
+		html += "11. Reporting Grid Square: " + $("#gridsquare").val() + "\n";
+		html += "\n";
+		html += "OBSERVED EVENT CONDITIONS\n";
+		html += "\n";
+		html += "12. Flood: " + $("#flood").val() + "\n";
+		html += "\n";
+		html += "13. Hail size: " + $("#hail_size").val() + "\n";
+		html += "\n";
+		html += "14. High Wind Speed: " + $("#high_wind_speed").val() + " " + $("#high_wind_units").text() + "\n";
+		html += "\n";
+		html += "15. Tornado / Funnel Cloud: " + $("#tornado_cloud").val() + "\n";
+		html += "\n";
+		html += "16. Wind Damage: " + $("#wind_damage").val() + "\n";
+		html += "\n";
+		html += "17. Winter Precipitation: " + $("#winter_precip").val() + "\n";
+		html += "\n";
+		html += "18. Snow: " + $("#snow").val() + " " + $("#snow_units").text() + "\n";
+		html += "\n";
+		html += "19. Freezing Rain: " + $("#freezing_rain").val() + " " + $("#freezing_rain_units").text() + "\n";
+		html += "\n";
+		html += "20. Heavy Rain: " + $("#heavy_rain").val() + " " + $("#heavy_rain_units").text() + "\n";
+		html += "\n";
+		html += "21.Time period: " + $("#time_period").val() + " " + $("#time_units").text() + "\n";
+		html += "\n";
+		html += "22.Additional Information or Damage Descriptions: " + $("#additional_info").val() + "\n";
+		html += "</textarea>";
+		html += "</pre>";
+
+		$(html).appendTo($("#dialog"));
+
+		$("#dialog").dialog({
+			width: 800,
+			height: 600,
+			modal: true,
+			open: function() {
+				var dialog_height = parseInt($(this).css("height")) - 50;
+				$("textarea", $(this)).css("height",dialog_height + 'px');
+			},
+			buttons: [
+				{
+					text: "Save as Text",
+					icon: "ui-icon-document",
+					class: "save-button",
+					click: function() {
+						var subject = $("#subject").val();
+						if (!subject) { subject = "Severe Weather Report"; }
+
+						var filename = subject + " " + $("#datetime").val() + ".txt";
+						filename = prompt("Please enter filename to save as",filename);
+						if (filename == null) { return; }
+
+						var new_file = new File([$("textarea", $(this)).val()],filename,{type: "text/plain"});
+						var download_link = document.createElement('a');
+						download_link.style.display = 'none';
+						download_link.href = URL.createObjectURL(new_file);
+						download_link.download = new_file.name;
+						download_link.onclick = function(e) { $(e.target).remove(); }
+						$("body").append(download_link);
+						download_link.click();
+					}
+				},
+				{
+					text: "Copy Text",
+					icon: "ui-icon-clipboard",
+					class: "copy-button",
+					click: function() {
+						navigator.clipboard.writeText($("pre textarea", $(this)).val());
+					}
+				},
+				/*
+				{
+					text: "Remove Extra Lines",
+					icon: "ui-icon-scissors",
+					click: function() {
+						var html = $("pre textarea",$(this)).val().toString();
+						html = html.replace(/\n\n/g,"\n");
+						$("pre textarea", $(this)).text(html);
+					}
+				},
+				*/
+				{
+					text: "Ok",
+					icon: "ui-icon-check",
+					click: function() {
+						$( this ).dialog( "close" );
+					}
+				}
+			]
+		});
+	});
+})
+</script>
+</head>
+<body>
+<p>
+<b>PACKET RADIO SEVERE WEATHER REPORT</b>
+</p>
+<form>	
+<pre>
+1. Sender: <input type="text" name="sender" id="sender" size=20>
+
+2. Report Date/Time (local): <input type="text" name="datetime" id="datetime" size=25>
+
+3. Report Version: <select name="report_version" id="report_version"><option selected>1st Report</option><option>2nd Report Updated Report</option><option>Final Report</option></select>
+
+
+4. Reporting Party Name: <input type="text" name="reporting_name" id="reporting_name" size=100>
+
+5. Reporting Party Phone Number: <input type="text" name="reporting_phone" id="reporting_phone" size=100>
+
+6. Reporting Party Email Address: <input type="text" name="reporting_email" id="reporting_email" size=100>
+
+EVENT AREA
+
+7. City: <input type="text" name="city" id="city" size=25>
+
+8. State/Province/Region: <input type="text" name="state" id="state" size=25>
+
+9. County: <input type="text" name="county" id="county" size=25>
+
+10. Other: <input type="text" name="other" id="other" size=25>
+ 
+11. Reporting Grid Square: <input type="text" name="gridsquare" id="gridsquare" size=8>
+
+OBSERVED EVENT CONDITIONS
+<!--
+Measurements used: <select name="units" id="units"><option selected>Imperial</option><option>Metric</option></select>
+-->
+12. Flood: <select name="flood" id="flood"><option selected>Choose</option><option>Unknown None</option><option>Minor Street Flooding</option><option>Low Water Crossing Flooded</option><option>Wide Spread Flooding Home/Business</option><option>Flooded Creek/Stream out of banks</option><option>River out of Banks</option><option>Other (please elaborate below</option></select>
+
+13. Hail size: <select name="hail_size" id="hail_size"><option selected>Choose</option><option>None</option><option>(penny) 0.88" | 22.352 mm</option><option>(nickel) 1.00" | 25.4 mm</option><option>(quarter) 1.25" | 31.75 mm</option><option>(half dollar) 1.50" | 38.1 mm</option><option>(walnut) 1.75" | 44.45 mm</option><option>(golfball) 2.00" | 50.8 mm</option><option>(hens egg) 2.50" | 69.85 mm</option><option>(tennisball) 2.75" | 76.2 mm</option><option>(baseball) 3.00" | 76.2 mm</option><option>(teacup) 4.00" | 101.6 mm</option><option>(grapefruit) 4.50" | 114.3 mm</option></select>
+
+14. High Wind Speed: <input type="text" name="high_wind_speed" id="high_wind_speed" size=8> <span id="high_wind_units">MPH</span>
+
+15. Tornado / Funnel Cloud: <select name="tornado_cloud" id="tornado_cloud"><option selected>Choose</option><option>Unknown</option><option>None</option><option>Funnel Cloud</option><option>Tornado</option><option>Wall Cloud</option></select>
+
+16. Wind Damage: <select name="wind_damage" id="wind_damage"><option selected>Choose</option><option>Unknown</option><option>None</option><option>Small Tree Limbs Down</option><option>Large Tree Limbs/Branches Down</option><option>Trees Snapped or Uprooted</option><option>Power Lines Down</option><option>Roof or Structural Damage</option><option>Other (please elaborate below)</option></select>
+
+17. Winter Precipitation: <select name="winter_precip" id="winter_precip"><option selected>Choose</option><option>Unknown</option><option>None</option><option>Snow</option><option>Sleet</option><option>Freezing</option><option>Rain Mixture</option></select>
+
+18. Snow: <input type="text" name="snow" id="snow"> <span id="snow_units">inches</span>
+
+19. Freezing Rain: <input type="text" name="freezing_rain" id="freezing_rain"> <span id="freezing_rain_units">inches</span> 
+
+20. Heavy Rain: <input type="text" name="heavy_rain" id="heavy_rain"> <span id="heavy_rain_units">inches</span>
+
+21. Time period: <input type="text" name="time_period" id="time_period"> <span id="time_units">hours</span> <i>(Report 1" or greater in an hour and every inch thereafter). </i>
+
+22.Additional Information or Damage Descriptions<i>(Be Brief)</i>:
+<textarea name="additional_info" id="additional_info" rows=6 cols=100>
+</textarea>
+</pre>
+
+<br>
+<hr>
+<br>
+
+<input type="button" id="generate" value="Generate/Save as Text">
+&nbsp;
+<input type="button" id="save-data" value="Save Data">
+&nbsp;
+<input type="button" id="load-data" value="Load Data">
+</form>
+
+<br>
+<hr>
+<br>
+
+<table border=0 width="100%"> 
+	<tr> 
+		<td>Form Concept By: N3MEL</td> 
+		<td>Form Created By: KN4LQN</td> 
+		<td>Ver 1.1</td> 
+	</tr> 
+	<tr> 
+		<td colspan=3 align="center"> 
+			<a href="http://vden.org/pktnet/severe_wx.html">Use the latest version of this form online</a>
+		</td> 
+	</tr> 
+</table>
+
+<br>
+
+&nbsp;
+
+<div id="dialog" title="" style="display: none;"></div>
+<input type="file" id="load-file" accept="application/json" style="display: none;">
+
+</body>
+</html>

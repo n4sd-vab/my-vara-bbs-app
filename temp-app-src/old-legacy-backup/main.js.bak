@@ -1,0 +1,2097 @@
+const { app, BrowserWindow, ipcMain, Menu, MenuItem, dialog } = require('electron');
+const Database = require('better-sqlite3');
+const path = require('path');
+const net = require('net');
+const fs = require('fs');
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+const dbPath = path.join(app.getPath('userData'), 'bbs.db');
+const db = new Database(dbPath);
+initializeDatabase();
+
+function loadSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  } catch {
+    return {
+      myCall: "",
+      bbsCall: "",
+      nodeCall: "",
+      digi1: "",
+      digi2: "",
+      varaIP: "",
+      varaCmdPort: "",
+      varaDataPort: "",
+      showVaraConsole: true,
+      yappReceiveDir: ""
+    };
+  }
+}
+
+let prefWindow = null;
+
+function createPreferencesWindow() {
+  if (prefWindow) {
+    prefWindow.focus();
+    return;
+  }
+
+  prefWindow = new BrowserWindow({
+    width: 400,
+    height: 500,
+    title: "Preferences",
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+
+  prefWindow.loadFile('preferences.html');
+
+  prefWindow.on('closed', () => {
+    prefWindow = null;
+  });
+}
+
+function saveSettings(settings) {
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  //reload settings in main process
+  settings = loadSettings();
+
+  // Notify renderer of updated settings
+  if (mainWindow) {
+    mainWindow.webContents.send("settings:updated", settings);
+  }
+  //TODO: consider also sending specific events for important individual settings (e.g., VARA console toggle) instead of a generic "settings:updated"
+}
+
+let settings = loadSettings();
+let appSettings = loadSettings();  // initial load
+
+ipcMain.on("settings:updated", (_event, newSettings) => {
+  appSettings = newSettings;
+  console.log("Main updated settings:", appSettings);
+});
+
+ipcMain.on("menu:create", (event, template) => {
+  const menu = new Menu();
+
+  template.forEach(item => {
+    const menuItem = new MenuItem({
+      label: item.label,
+      click: () => {
+        // Send back to renderer to handle the action
+        event.sender.send("menu-item-clicked", item.label);
+      }
+    });
+    menu.append(menuItem);
+  });
+
+  menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
+});
+
+
+let mainWindow;
+let cmdSocket = null;
+let cmdBuffer = "";
+let dataSocket = null;
+let dataBuffer = "";
+let inYapp = false;   // global YAPP mode flag
+let yappReceiver = null;  // will hold YappReceiver instance during YAPP transfers
+let inFileList = false;  // flag to indicate we're currently receiving a file list from the BBS
+let fileList = [];
+let endOfFileList = false;  // flag to detect end of file list when BBS prompt is not standard
+
+let inYappSend = false;
+let yappSend = null; // holds the sender state machine instance
+
+let bbsLinkUp = false;
+let bbsPromptReady = false;
+
+// Persistent buffer for WP mode
+let wpBuffer = "";
+let whitePagesMode = false;
+let whitePagesResults = [];
+
+let messageListMode = "local";   // or "none", depending on your preference
+let listBuffer = "";
+
+// -------------------------
+// READ MODE STATE
+// -------------------------
+let inReadMode = false;
+let currentReadMsgNum = null;
+let currentReadBody = [];
+let readBuffer = "";
+let footerSeen = false;
+let endOfReadMode = false;
+
+
+ipcMain.handle("fs:pick-directory", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory"]
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle("fs:pick-file", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openFile"]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
+
+
+
+const menuTemplate = [
+  {
+    label: "File",
+    submenu: [
+      { role: "quit" }
+    ]
+  },
+  {
+    label: "Settings",
+    submenu: [
+      {
+        label: "Preferences",
+        click: () => {
+          createPreferencesWindow();
+        }
+      },
+      {
+        label: "Address Book Add",
+        click: () => {
+          mainWindow.webContents.send("address-book:open-add");
+        }
+      },
+      {
+        label: "Address Book View",
+        click: () => {
+          mainWindow.webContents.send("address-book:open-view");
+        }
+      },
+      {
+        label: "WhitePages Import",
+        click: () => {
+          mainWindow.webContents.send("whitepages:open-modal");
+        }
+      }
+    ]
+
+  },
+  {
+    label: "View",
+    submenu: [
+      {
+        label: "Show VARA Console",
+        type: "checkbox",
+        checked: settings.showVaraConsole,
+        click: (menuItem) => {
+          settings.showVaraConsole = menuItem.checked;
+          saveSettings(settings);
+          mainWindow.webContents.send("ui:toggle-vara-console", menuItem.checked);
+        }
+
+      }
+    ]
+  },
+  {
+    label: "YAPP",
+    submenu: [
+      {
+        label: "Receive File",
+        click: () => {
+          mainWindow.webContents.send("yapp:open-receive");
+        }
+      },
+      {
+        label: "Send File",
+        click: () => {
+          mainWindow.webContents.send("yapp:open-send");
+        }
+      }
+    ]
+
+  },
+  {
+    label: "Help",
+    submenu: [
+      {
+        label: "BBS Command Reference",
+        click: () => {
+          mainWindow.webContents.send("ui:open-bbs-help");
+        }
+      },
+      {
+        label: "About",
+        click: () => {
+          mainWindow.webContents.send("ui:open-about");
+        }
+      }
+    ]
+  }
+];
+
+const menu = Menu.buildFromTemplate(menuTemplate);
+Menu.setApplicationMenu(menu);
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 900,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+
+    }
+  });
+
+  mainWindow.loadFile('index.html');
+
+  if (!app.isPackaged) {
+    mainWindow.webContents.openDevTools();
+  }
+}
+
+function initializeDatabase() {
+  db.exec(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id INTEGER PRIMARY KEY,
+          msgNum INTEGER,
+          date TEXT,
+          typeCode TEXT,
+          type TEXT,
+          size INTEGER,
+          recipient TEXT,
+          at TEXT,
+          sender TEXT,
+          subject TEXT,
+          body TEXT,
+          read INTEGER DEFAULT 0,
+          saved INTEGER DEFAULT 0,
+          deleted INTEGER DEFAULT 0,
+          outbox INTEGER DEFAULT 0,
+          sent INTEGER DEFAULT 0,
+          category TEXT,
+          seenInLM INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS address_book (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            callsign TEXT UNIQUE,
+            homebbs TEXT,
+            name TEXT,
+            zipcode TEXT,
+            address TEXT,
+            notes TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY,
+            timestamp TEXT,
+            direction TEXT,
+            content TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_msgNum ON messages(msgNum);
+
+        CREATE INDEX IF NOT EXISTS idx_address_callsign ON address_book(callsign);
+
+    `);
+}
+
+let lineWaiters = [];
+
+function waitForLine(regex, timeout = 15000) {
+  return new Promise((resolve, reject) => {
+    const waiter = { regex, resolve };
+    lineWaiters.push(waiter);
+
+    setTimeout(() => {
+      const idx = lineWaiters.indexOf(waiter);
+      if (idx !== -1) lineWaiters.splice(idx, 1);
+      reject(new Error(`Timeout waiting for: ${regex}`));
+    }, timeout);
+  });
+}
+
+function notifyLineListeners(line) {
+  console.log("notifyLineListeners GOT:", JSON.stringify(line));
+  for (let i = lineWaiters.length - 1; i >= 0; i--) {
+    const waiter = lineWaiters[i];
+    console.log("Testing waiter against line:", waiter.regex, JSON.stringify(line));
+    if (waiter.regex.test(line)) {
+      waiter.resolve(line);
+      lineWaiters.splice(i, 1);
+    }
+  }
+}
+
+
+function parseWhitePagesLine(line) {
+  const parts = line.trim().split(/\s+/);
+
+  const callsign = parts[0];
+  const homebbs = parts[1];
+
+  // Everything after homebbs
+  const rest = parts.slice(2).join(" ").trim();
+
+  // Extract ZIP (5 digits)
+  const zipMatch = rest.match(/\b\d{5}\b/);
+  const zipcode = zipMatch ? zipMatch[0] : "";
+
+  let name = "";
+  let address = "";
+
+  if (zipcode) {
+    // Split at ZIP
+    const [beforeZip, afterZip] = rest.split(zipcode);
+
+    name = beforeZip.trim();          // everything before ZIP
+    address = afterZip.trim();        // everything after ZIP (city/state)
+  } else {
+    // No ZIP → name is first token
+    const tokens = rest.split(/\s+/);
+    name = tokens[0];
+    address = rest.replace(name, "").trim();
+  }
+
+  return {
+    callsign,
+    homebbs,
+    name,
+    zipcode,
+    address,
+    notes: ""
+  };
+}
+
+
+function parseListLine(line) {
+  const parts = line.trim().split(/\s+/);
+
+  const msgNum = parseInt(parts[0]);
+  const date = parts[1];
+  const typeCode = parts[2];
+  const size = parseInt(parts[3]);
+  const toCall = parts[4];
+
+  let at = "";
+  let fromCall = "";
+  let subject = "";
+
+  // ⭐ Detect AT by pattern, not position
+  if (parts[5].startsWith("@")) {
+    // AT is present
+    at = parts[5];
+    fromCall = parts[6];
+    subject = parts.slice(7).join(" ");
+  } else {
+    // AT is missing
+    at = "";
+    fromCall = parts[5];
+    subject = parts.slice(6).join(" ");
+  }
+
+  const type = typeCode.startsWith("B") ? "bulletin" : "private";
+
+  return {
+    msgNum,
+    date,
+    typeCode,
+    type,
+    size,
+    recipient: toCall,
+    at,
+    sender: fromCall,
+    subject
+  };
+}
+
+function upsertMessageListEntry(msg) {
+  const stmt = db.prepare(`
+        INSERT INTO messages (msgNum, date, typeCode,type, size, recipient, at, sender, subject, read, saved, deleted)
+        VALUES (@msgNum, @date, @typeCode, @type, @size, @recipient, @at, @sender, @subject, 0, 0, 0)
+        ON CONFLICT(msgNum) DO UPDATE SET
+            date=@date,
+            sender=@sender,
+            recipient=@recipient,
+            subject=@subject
+    `);
+
+  stmt.run(msg);
+
+  // Mark this message as seen in the latest LM
+  db.prepare(`
+      UPDATE messages SET seenInLM = 1 WHERE msgNum = ?
+  `).run(msg.msgNum);
+
+}
+
+function saveMessageBody(msgNum, body) {
+  db.prepare(`
+        UPDATE messages
+        SET body = ?
+        WHERE msgNum = ?
+    `).run(body, msgNum);
+  console.log("DB SAVE", msgNum, "len", body.length);
+}
+
+function saveOutboxMessage(msg) {
+  const date = new Date();
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    timeZone: 'UTC'
+  });
+  // Format and replace space with hyphen
+  const formattedDate = formatter.format(date).replace(' ', '-');
+
+  const typeCode = msg.type;
+  const type = msg.type === "P" ? "private" : "bulletin";
+
+  console.log("Saving outbox message to DB:", { ...msg, date: formattedDate, typeCode, type });
+  db.prepare(`
+        INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, outbox, sent)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+    `).run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
+
+  return true;
+}
+
+function saveMessage(msg) {
+  const date = new Date();
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    timeZone: 'UTC'
+  });
+  // Format and replace space with hyphen
+  const formattedDate = formatter.format(date).replace(' ', '-');
+
+  const typeCode = msg.type; // single character code like "P" or "B"
+  const type = msg.type === "P" ? "private" : "bulletin";
+
+  console.log("Saving message to DB(2):", { ...msg, date: formattedDate, typeCode, type });
+  db.prepare(`
+        INSERT INTO messages (msgNum, date, typeCode, type, recipient, sender, subject, body, saved, outbox)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+    `).run(msg.msgNum, formattedDate, typeCode, type, msg.recipient, msg.sender, msg.subject, msg.body);
+
+  return true;
+}
+
+app.whenReady().then(() => {
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+/**
+ * Helper: send log lines to renderer
+ */
+function logToRenderer(type, msg) {
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('vara:log', { type, msg });
+  }
+}
+
+function tick() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
+function formatBbsLine(line) {
+  // Do NOT trim the whole line — it removes leading spacing used for alignment
+  const parts = line.split(/\s+/);   // still splits on whitespace, but we will re-pad
+
+  const msgNum = parts[0] || "";
+  const date = (parts[1] || "");
+  const status = (parts[2] || "").padStart(8);
+  const size = (parts[3] || "").padStart(8);
+  const to = (parts[4] || "").padStart(8);
+  const at = (parts[5] || "").padStart(8);
+  const from = (parts[6] || "").padStart(8);
+  const subject = parts.slice(7).join(" "); // subject can be long
+
+  return `
+        <div class="msgRow" data-msg="${msgNum}">
+            <span class="msgRow">${msgNum}</span>
+            <span class="msgRow">${date}</span>
+            <span class="msgRow">${status}</span>
+            <span class="msgRow">${size}</span>
+            <span class="msgRow">${to}</span>
+            <span class="msgRow">${at}</span>
+            <span class="msgRow">${from}</span>
+            <span class="msgRow">${subject}</span>
+        </div>
+    `;
+}
+
+async function ensureVaraConnected() {
+    if (cmdSocket && !cmdSocket.destroyed && dataSocket && !dataSocket.destroyed) {
+        return true; // already connected
+    }
+
+    return await ipcMain.handle("vara-connect")();
+}
+
+function sendConnectCommand() {
+  if (!cmdSocket) {
+    console.error("sendConnectCommand: cmdSocket is not connected");
+    return;
+  }
+
+  const myCall = appSettings.myCall || settings.myCall;
+  const bbsCall = appSettings.bbsCall || settings.bbsCall;
+  const digi1 = appSettings.digi1 || settings.digi1;
+  const digi2 = appSettings.digi2 || settings.digi2;
+
+  let cmd = `CONNECT ${myCall} ${bbsCall}`;
+  if (digi1) cmd += ` VIA ${digi1}`;
+  if (digi2) cmd += ` ${digi2}`;
+
+  console.log("MAIN: Sending CONNECT:", cmd);
+  cmdSocket.write(cmd + "\r");
+}
+
+function sendRawBytes(buffer) {
+  if (!Buffer.isBuffer(buffer)) {
+    buffer = Buffer.from(buffer);
+  }
+  try {
+    dataSocket.write(buffer);
+  } catch (err) {
+    console.error("sendRawBytes error:", err);
+  }
+}
+
+function finishReadMode() {
+  if (!inReadMode) return;  // Prevent double-ending
+
+  inReadMode = false;
+
+  const body = currentReadBody.join("\n");
+  console.log("READ MODE END for message", currentReadMsgNum);
+  console.log("READ MODE: accumulated body length =", currentReadBody.length);
+
+  // ⭐ FIXED: call with positional parameters
+  saveMessageBody(currentReadMsgNum, body);
+
+  // Renderer still gets the object — that's fine
+  mainWindow.webContents.send("bbs:message-body", {
+    msgNum: currentReadMsgNum,
+    body
+  });
+  mainWindow.webContents.send("bbs:message-read", currentReadMsgNum);
+
+  currentReadBody = [];
+  readBuffer = "";
+}
+
+function deleteMessage(msgNum) {
+  try {
+    // Ensure msgNum is a number
+    const numMsg = parseInt(msgNum, 10);
+
+    if (isNaN(numMsg)) {
+      console.error("deleteMessage: Invalid msgNum - not a number:", msgNum);
+      return;
+    }
+
+    const result = db.prepare("UPDATE messages SET deleted = 1 WHERE msgNum = ?").run(numMsg);
+
+    console.log("Message delete attempt - msgNum:", numMsg, "Changes made:", result.changes);
+
+    if (result.changes === 0) {
+      console.warn("deleteMessage: No messages found with msgNum =", numMsg);
+    }
+
+    mainWindow.webContents.send("messages:deleted", numMsg);
+  } catch (err) {
+    console.error("deleteMessage error:", err);
+  }
+}
+
+ipcMain.handle("messages:delete", (_event, msgNum) => {
+  deleteMessage(msgNum);
+});
+
+function markMessageSaved(msgNum) {
+  db.prepare("UPDATE messages SET saved = 1 WHERE msgNum = ?").run(msgNum);
+  console.log("Message marked as saved in DB:", msgNum);
+  mainWindow.webContents.send("messages:saved", msgNum);
+}
+
+
+ipcMain.on("bbs-state", (_event, state) => {
+  if (state.bbsLinkUp !== undefined) bbsLinkUp = state.bbsLinkUp;
+  if (state.bbsPromptReady !== undefined) bbsPromptReady = state.bbsPromptReady;
+
+  console.log("MAIN BBS STATE:", { bbsLinkUp, bbsPromptReady });
+});
+
+ipcMain.on("bbs:filter-bulletins", (event, category) => {
+  let rows;
+  if (category === "ALL") {
+    rows = db.prepare("SELECT * FROM messages WHERE type='bulletin' ORDER BY msgNum DESC").all();
+  } else {
+    rows = db.prepare("SELECT * FROM messages WHERE type='bulletin' AND recipient = ? ORDER BY msgNum DESC").all(category);
+  }
+  mainWindow.webContents.send("bbs:bulletin-list", rows);
+});
+
+// Function to ensure BBS connection before sending messages, 
+// with timeout and error handling
+async function ensureBbsConnected() {
+  if (bbsLinkUp && bbsPromptReady) return true;
+  console.log("Ensuring BBS connection... Current state:", { bbsLinkUp, bbsPromptReady });
+  // Ask VARA/BPQ to connect
+  sendConnectCommand();
+
+  // Wait up to 15 seconds for renderer to report link + prompt
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (bbsLinkUp && bbsPromptReady) {
+        clearInterval(timer);
+        resolve(true);
+      }
+      if (Date.now() - start > 15000) {
+        clearInterval(timer);
+        reject(new Error("Timeout waiting for BBS connect"));
+      }
+    }, 200);
+  });
+}
+
+// -------------------------- OUTBOX SENDING LOGIC -----------------------
+
+ipcMain.handle("bbs:send-outbox", async () => {
+  try {
+    await uploadOutboxMessages();
+    return true;
+  } catch (err) {
+    console.error("Send failed:", err);
+    throw err;
+  }
+});
+
+async function uploadOutboxMessages() {
+  const outbox = db.prepare("SELECT * FROM messages WHERE outbox = 1 AND deleted = 0 AND sent = 0").all();
+
+  if (outbox.length === 0) {
+    mainWindow.webContents.send("toast", "Outbox is empty");
+    return;
+  }
+
+  for (const msg of outbox) {
+    await uploadSingleMessage(msg);
+  }
+
+  mainWindow.webContents.send("toast", "Outbox messages sent");
+}
+
+function uploadSingleMessage(msg) {
+  return new Promise(async (resolve, reject) => {
+
+    try {
+      console.log("Uploading message to BBS:", msg);
+      await ensureBbsConnected();
+
+      // Register waiters BEFORE sending SP
+      const wTitle = waitForLine(/Enter Title/i);
+      const wAddress = waitForLine(/Address/i);
+      const sendcmd = msg.type === "P" ? `SP ${msg.recipient}\r` : `SB ${msg.recipient}\r`;
+      // Send SP
+
+      dataSocket.write(sendcmd);
+
+      // Wait for whichever comes first
+      await Promise.race([wTitle, wAddress]);
+
+      // Now wait specifically for Enter Title
+      await wTitle;
+
+      // Send title
+      dataSocket.write(`${msg.subject}\r`);
+
+      // Wait for Enter Message Text
+      await waitForLine(/Enter Message Text/i);
+
+      // Send body
+      for (const line of msg.body.split(/\r?\n/)) {
+        dataSocket.write(line + "\r");
+      }
+
+      // End message
+      dataSocket.write("/ex\r");
+
+      // Wait for Message: ### Size: ###  At: ####
+      const result = await waitForLine(/Message:\s+(\d+).*Size:\s+(\d+)/i);
+
+      const match = result.match(/Message:\s+(\d+).*Size:\s+(\d+)/i);
+      const msgNum = match[1];
+      const size = match[2];
+
+      // 7. Update DB
+      const date = new Date();
+      const formatter = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+      // Format and replace space with hyphen
+      const formattedDate = formatter.format(date).replace(' ', '-');
+
+      db.prepare(`
+                UPDATE messages
+                SET msgNum = ?, size = ?, sent = 1, outbox = 0, date = ?
+                WHERE id = ?
+            `).run(msgNum, size, formattedDate, msg.id);
+
+      resolve();
+
+    } catch (err) {
+      console.error("Upload failed:", err);
+      reject(err);
+    }
+  });
+}
+
+// ----------------- Start of Retrieve Bulk Messages Logic -----------------------
+
+ipcMain.handle('bbs:receive-messages', async () => {
+  console.log("Received request to receive BBS messages");
+    await ensureBbsConnected();
+
+    // FAST SYNC: only get NEW messages list
+    endOfFileList = false;
+    messageListMode = "bbs";
+    dataSocket.write("L\r");   // NEW messages only
+
+    await waitForListModeToFinish();
+
+    // Determine which private messages need bodies
+    const rows = db.prepare(`
+        SELECT msgNum FROM messages
+        WHERE type='private' AND deleted=0 AND read=0
+    `).all();
+
+    const toDownload = rows.map(r => r.msgNum);
+
+    if (toDownload.length > 0) {
+        endOfReadMode = false;
+        dataSocket.write("R " + toDownload.join(" ") + "\r");
+        await waitForReadModeToFinish();
+    }
+
+    return { downloaded: toDownload.length };
+});
+
+
+function waitForListModeToFinish() {
+  return new Promise(resolve => {
+    const check = () => {
+      if (endOfFileList === true) {
+        resolve();
+      } else {
+        setTimeout(check, 50);
+      }
+    };
+    check();
+  });
+}
+
+function waitForReadModeToFinish() {
+  return new Promise(resolve => {
+    const check = () => {
+      if (endOfReadMode === true) {
+        resolve();
+      } else {
+        setTimeout(check, 50);
+      }
+    };
+    check();
+  });
+}
+
+ipcMain.handle('full-sync', async () => {
+    await ensureBbsConnected();
+
+    //
+    // 1. PRIVATE MESSAGE FULL SYNC (LP)
+    //
+    db.prepare("UPDATE messages SET seenInLP = 0 WHERE type='private'").run();
+
+    endOfFileList = false;
+    messageListMode = "lp";
+    dataSocket.write("LP\r");
+
+    await waitForListModeToFinish();
+
+    db.prepare(`
+        UPDATE messages
+        SET deleted = 1
+        WHERE type='private' AND seenInLP = 0 AND saved = 0
+    `).run();
+
+    //
+    // 2. BULLETIN FULL SYNC (LB)
+    //
+    db.prepare("UPDATE messages SET seenInLB = 0 WHERE type='bulletin'").run();
+
+    endOfFileList = false;
+    messageListMode = "lb";
+    dataSocket.write("LB\r");
+
+    await waitForListModeToFinish();
+
+    db.prepare(`
+        UPDATE messages
+        SET deleted = 1
+        WHERE type='bulletin' AND seenInLB = 0 AND saved = 0
+    `).run();
+
+    return { status: "full-sync-complete" };
+});
+// -------------------------END OF MAIN LOGIC, START OF YAPP IMPLEMENTATION-------------------------
+
+function handleFileListText(text) {
+  console.log("YAPP FILELIST: Received text chunk:", JSON.stringify(text));
+
+  const lines = text.split("\r");
+
+  for (const line of lines) {
+    console.log("YAPP FILELIST: Line:", JSON.stringify(line));
+
+    // Detect FILES entries
+    const fileMatch = line.match(/^(.+)\s+(\d+)$/);
+    if (fileMatch) {
+      const name = fileMatch[1].trim();
+      const size = parseInt(fileMatch[2], 10);
+
+      console.log("YAPP FILELIST: MATCHED FILE ENTRY:", name, size);
+      fileList.push({ name, size });
+      continue;
+    }
+
+    // End of list
+    if (line.trim() === "" || line.includes("BPQ") || line.includes(">")) {
+      console.log("YAPP FILELIST: END OF LIST DETECTED");
+      console.log("YAPP FILELIST: Final list:", fileList);
+
+      inFileList = false;
+      mainWindow.webContents.send("yapp:file-list", fileList);
+
+      fileList = [];
+      return;
+    }
+  }
+}
+
+function buildYappHeader(filename, fileSize) {
+  const sizeStr = fileSize.toString();
+  const nameLen = filename.length;
+
+  // LEN = filename + NUL + sizeStr + NUL
+  const len = nameLen + 1 + sizeStr.length + 1;
+
+  const header = Buffer.alloc(1 + 1 + len);
+  let offset = 0;
+
+  header[offset++] = 0x01;     // SOH
+  header[offset++] = len;      // LENGTH BYTE
+  header.write(filename, offset);
+  offset += nameLen;
+  header[offset++] = 0x00;     // NUL
+  header.write(sizeStr, offset);
+  offset += sizeStr.length;
+  header[offset++] = 0x00;     // NUL
+
+  return header;
+}
+
+const YAPP_BLOCK_SIZE = 255; // or 256 with len=0
+
+function buildYappDataBlock(chunk, isFinal) {
+  const len = chunk.length;
+
+  if (isFinal) {
+    // Final block: 02 LEN DATA 03 01
+    const block = Buffer.alloc(2 + len + 2);
+    let o = 0;
+    block[o++] = 0x02;
+    block[o++] = len;
+    chunk.copy(block, o);
+    o += len;
+    block[o++] = 0x03;
+    block[o++] = 0x01;
+    return block;
+  }
+
+  // Intermediate block: 02 LEN DATA
+  const block = Buffer.alloc(2 + len);
+  let o = 0;
+  block[o++] = 0x02;
+  block[o++] = len;
+  chunk.copy(block, o);
+  return block;
+}
+
+function computeChecksum(buffer) {
+  let checksum = 0;
+  for (const byte of buffer) {
+    checksum = (checksum + byte) & 0xff;
+  }
+  return checksum;
+}
+
+function updateRecvProgress(received, total) {
+  const percent = Math.floor((received / total) * 100);
+
+  setImmediate(() => {
+    if (mainWindow && mainWindow.webContents) {
+      console.log(`YAPP Progress: received ${received} of ${total} bytes (${percent}%)`);
+
+      mainWindow.webContents.send("yapp:recv-progress", { received, total, percent });
+    }
+  });
+}
+
+function sendProgressToRenderer(sent, total) {
+  if (!mainWindow) return;
+
+  mainWindow.webContents.send("yapp:send-progress", {
+    sent,
+    total,
+    percent: Math.floor((sent / total) * 100)
+  });
+}
+/**
+ * Connect to VARA FM command and data ports
+ */
+ipcMain.handle("vara-connect", async () => {
+  return new Promise((resolve, reject) => {
+    let pending = 2;
+    let hadError = false;
+
+    const done = (err) => {
+      if (err && !hadError) {
+        hadError = true;
+        reject(err);
+      } else {
+        pending--;
+        if (pending === 0 && !hadError) resolve(true);
+      }
+    };
+
+    // Command socket
+    cmdSocket = net.createConnection({ host: settings.varaIP, port: settings.varaCmdPort }, () => {
+      logToRenderer('info', `Connected to VARA command port ${settings.varaCmdPort}`);
+      done();
+    });
+
+    cmdSocket.on('data', (data) => {
+      logToRenderer('cmd', data.toString());
+      cmdBuffer += data.toString();
+
+      const parts = cmdBuffer.split(/\r\n|\r|\n/);
+
+      // Process all complete lines
+      for (let i = 0; i < parts.length - 1; i++) {
+        const trimmed = parts[i].trim();
+        if (!trimmed) continue;
+
+        if (/^CONNECTED\b/i.test(trimmed)) {
+          bbsLinkUp = true;
+          console.log("CMD: Link up");
+        }
+
+        if (/^DISCONNECTED\b/i.test(trimmed)) {
+          bbsLinkUp = false;
+          bbsPromptReady = false;
+          console.log("CMD: Link down");
+        }
+
+        if (/^WRONG\b/i.test(trimmed)) {
+          console.log("CMD: WRONG (modem error)");
+        }
+
+        // YAPP BUFFER logic stays below
+      }
+
+      // Save incomplete tail
+      cmdBuffer = parts[parts.length - 1];
+
+      // YAPP BUFFER logic
+      if (yappSend && yappSend.phase === "sendingData") {
+        const line = data.toString("utf8");
+        if (line.startsWith("BUFFER")) {
+          const parts = line.split(" ");
+          const remaining = parseInt(parts[1], 10);
+          const total = yappSend.fileBytes.length;
+
+          const sent = total - remaining;
+          const percent = Math.floor((sent / total) * 100);
+
+          mainWindow.webContents.send("yapp:send-progress", {
+            sent,
+            total,
+            percent
+          });
+        }
+      }
+    });
+
+    cmdSocket.on('error', (err) => {
+      logToRenderer('error', `Command socket error: ${err.message}`);
+      done(err);
+    });
+
+    cmdSocket.on('close', () => {
+      logToRenderer('info', 'Command socket closed');
+    });
+
+    // Data socket
+    dataSocket = net.createConnection({ host: settings.varaIP, port: settings.varaDataPort }, () => {
+      logToRenderer('info', `Connected to VARA data port ${settings.varaDataPort}`);
+      done();
+    });
+
+    // ---------------- VARA DATA SOCKET ----------------
+    dataSocket.on('data', (data) => {
+
+      // Detect BBS prompt
+      const lines = data.toString().split('\r');
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
+          bbsPromptReady = true;
+          console.log("DATA: BBS prompt detected");
+        }
+      }
+
+      // --------------------------
+      // Check for WhitePages lines
+      // --------------------------
+      if (whitePagesMode) {
+
+        // Accumulate raw TCP data
+        wpBuffer += data.toString();
+
+        // Split on CR (BPQ uses CR, not LF)
+        const parts = wpBuffer.split('\r');
+
+        // Process all complete lines
+        for (let i = 0; i < parts.length - 1; i++) {
+          const line = parts[i].trim();
+
+          if (!line) continue;
+
+          // END OF LISTING: "de CALL>"
+          if (/^de\s+[A-Za-z0-9]{3,6}>$/.test(line)) {
+            console.log("WhitePages: End of listing detected");
+            whitePagesMode = false;
+            wpBuffer = "";   // clear buffer
+            return;
+          }
+
+          // VALID WP ENTRY
+          if (/^[A-Z0-9]{3,6}\s+\S+/.test(line)) {
+            const entry = parseWhitePagesLine(line);
+            whitePagesResults.push(entry);
+            mainWindow.webContents.send("whitepages:line", entry);
+          }
+        }
+
+        // Save incomplete tail
+        wpBuffer = parts[parts.length - 1];
+
+        return; // swallow WP lines
+      }
+
+      if (inYappSend && !yappSend) {
+        // We are in YAPP mode but state machine not initialized yet
+        // Ignore all text until state machine starts
+        return;
+      }
+
+      //console.log("RAW DATA:", data);
+      //console.log("HEX:", data.toString('hex'));
+      console.log("ascii:", data.toString('ascii'));
+      //console.log("BYTES:", [...data]);
+      //console.log("DATA SOCKET RECEIVED:", data);
+      console.log("inYappSend =", inYappSend);
+
+      try {
+        if (inYappSend && yappSend) {
+          const bytes = [...data];
+          const code = bytes[1];
+          const text = data.toString("utf8");
+
+          if (
+            text.includes("Unexpected message during YAPP Transfer") ||
+            text.includes("Transfer cancelled") ||
+            text.includes("Invalid Command")
+            //text.includes("already exists")
+          ) {
+            console.log("YAPP: remote cancelled transfer via BPQ message");
+            clearTimeout(yappSend.ackTimeout);
+            yappSend.abortSend("Remote cancelled YAPP transfer");
+            return;
+          }
+
+          if (bytes[0] === 0x15 || bytes[0] === 0x18) { // NAK - treat as fatal error
+            const message = text.slice(2).split('\r')[0]; // remove "NAK " prefix and any trailing text
+            console.log("YAPP: received NAK from VARA:", message);
+            yappSend.abortSend(message || "Received NAK from VARA");
+            inYappSend = false;
+            return;
+          }
+
+          // Only treat pure ACK frames as control
+          if (bytes[0] !== 0x06) {
+            return;
+          }
+
+          console.log("YAPP ACK:", yappSend.phase, "ACK =", code);
+
+          // 06 01 — ENQ accepted
+          if (code === 0x01 && yappSend.phase === "waitingAckEnq") {
+            clearTimeout(yappSend.ackTimeout);
+
+            const header = buildYappHeader(yappSend.fileName, yappSend.fileSize);
+            sendRawBytes(header);
+
+            yappSend.phase = "waitingAckHeader";
+            yappSend.startAckTimer();
+            return;
+          }
+
+          // 06 02 — header accepted, start streaming data
+          if (code === 0x02 && yappSend.phase === "waitingAckHeader") {
+            clearTimeout(yappSend.ackTimeout);
+
+            yappSend.phase = "sendingData";
+            yappSend.sendNextBlock();
+            return;
+          }
+
+          // 06 03 — EOF ACK (BPQ has full file)
+          if (code === 0x03) {
+            clearTimeout(yappSend.ackTimeout);
+
+            // Send EOT (single byte)
+            sendRawBytes(Buffer.from([0x04, 0x01]));
+
+            yappSend.phase = "waitingAckEot";
+            yappSend.startAckTimer();
+            return;
+          }
+
+          // 06 04 — EOT ACK, done
+          if (code === 0x04 && yappSend.phase === "waitingAckEot") {
+            clearTimeout(yappSend.ackTimeout);
+            yappSend.finishSend();
+            return;
+          }
+
+          return;
+        }
+        // -------------------------
+        // 3. YAPP RECEIVE MODE
+        // -------------------------
+        if (inYapp) {
+          if (!yappReceiver || typeof yappReceiver.feed !== 'function') {
+            console.error("YAPP mode active but yappReceiver is not properly initialized:", yappReceiver);
+            return;
+          }
+          yappReceiver.feed(data);
+          return;   // do NOT fall through to text logic
+        }
+
+        // -------------------------
+        // 4. FILE LIST MODE
+        // -------------------------
+        if (inFileList) {
+          handleFileListText(data.toString());
+          return;   // do NOT fall through to normal text logic
+        }
+        // ----------------------------------------------------
+        // 5. LIST MODE (BBS message list)
+        // ----------------------------------------------------
+        if (messageListMode === "bbs") {
+
+          const text = data.toString();
+          listBuffer += text;
+
+          const parts = listBuffer.split('\r');
+
+          for (let i = 0; i < parts.length - 1; i++) {
+            const line = parts[i].trim();
+            if (!line) continue;
+
+            // BPQ BBS Prompt = End of LIST output
+            if (/^\s*de\s+[A-Z0-9\-]+>/i.test(line)) {
+              messageListMode = "local";
+              listBuffer = "";
+              endOfFileList = true;
+              mainWindow.webContents.send("bbs:list-end");
+              return;
+            }
+
+            // LIST line pattern
+            const msgListPattern = /^\s*\d+\s+\d{1,2}-[A-Za-z]{3}\s+[A-Z$]{1,3}\s+\d+/;
+
+            if (msgListPattern.test(line)) {
+              const parsed = parseListLine(line);
+
+              // Save to DB
+              upsertMessageListEntry(parsed);
+              console.log("Line added to database:", parsed);
+              // Send to renderer
+              //mainWindow.webContents.send("bbs:list-line", parsed);
+            }
+          }
+
+          // Save incomplete tail
+          listBuffer = parts[parts.length - 1];
+          return;
+        }
+
+
+        // ----------------------------------------------------
+        // 6. READ MODE (message body retrieval)
+        // ----------------------------------------------------
+
+        // Detect READ start
+        if (!inReadMode) {
+          const text = data.toString();
+          readBuffer += text;
+          console.log("Not in read mode");
+          const parts = readBuffer.split('\r');
+
+          for (let i = 0; i < parts.length - 1; i++) {
+            const line = parts[i].trim();
+
+            // Start of message: "From: ..."
+            const readStart =
+              line.match(/^From:\s+(.+)/i) ||
+              line.match(/^(?:de\s+[A-Z0-9\-]+>)?Message\s+#?(\d+)\s+from/i);
+            console.log("readStart = ", readStart);
+
+            if (readStart) {
+              inReadMode = true;
+              currentReadMsgNum = null;
+              currentReadBody = [];
+
+              // ⭐ KEEP the From: line
+              currentReadBody.push(line);
+
+              readBuffer = "";
+              footerSeen = false;
+              console.log("READ MODE START (From: line)");
+              continue;
+            }
+          }
+
+          readBuffer = parts[parts.length - 1];
+          // Not in READ mode yet → fall through to normal text
+        }
+
+        // ----------------------------------------------------
+        // READ MODE ACTIVE
+        // ----------------------------------------------------
+        if (inReadMode) {
+          const text = data.toString();
+          readBuffer += text;
+
+          const parts = readBuffer.split('\r');
+
+          for (let i = 0; i < parts.length - 1; i++) {
+            const raw = parts[i];
+            const line = raw.trim();
+
+            console.log("READ MODE line:", JSON.stringify(line));
+
+            // 1. END OF MESSAGE (explicit footer) – extract msgNum here
+            const footer = line.match(/^\[End of Message #(\d+)/i);
+            if (footer) {
+              const msgNum = parseInt(footer[1]);
+              console.log("END detected: explicit footer for msg", msgNum);
+
+              // ⭐ KEEP the footer line
+              currentReadBody.push(line);
+
+              saveMessageBody(msgNum, currentReadBody.join("\n"));
+
+              //db.prepare("UPDATE messages SET read = 1 WHERE msgNum = ?").run(msgNum);
+
+              currentReadBody = [];
+              currentReadMsgNum = null;
+              continue;
+            }
+
+            // 2. END OF READ MODE (prompt)
+            if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
+              console.log("END detected: prompt-only line");
+              endOfReadMode = true;
+
+              // nothing to save here; footer already handled last message
+              inReadMode = false;
+              currentReadMsgNum = null;
+              currentReadBody = [];
+              readBuffer = "";
+              footerSeen = false;
+              return;
+            }
+
+            // 3. START OF NEXT MESSAGE (From:) inside READ MODE
+            const nextStart = line.match(/^From:\s+(.+)/i);
+            if (nextStart) {
+              console.log("START of next message (From: line)");
+              // Start new body
+              currentReadBody = [];
+
+              // ⭐ KEEP the From: line
+              currentReadBody.push(line);
+
+              continue;               // swallow this line; body lines follow
+            }
+
+            // 4. Normal body line (including blank lines)
+            currentReadBody.push(raw);
+          }
+
+          readBuffer = parts[parts.length - 1];
+          return;
+        }
+
+        // -------------------------
+        // 4. NORMAL BBS TEXT MODE
+        // -------------------------
+        if (inYappSend) return;   // suppress BBS text while sending YAPP
+
+        dataBuffer += data.toString();   // accumulate
+
+        const parts = dataBuffer.split('\r');
+
+        // All complete lines except the last
+        for (let i = 0; i < parts.length - 1; i++) {
+          const line = parts[i];
+          logToRenderer('data', line);
+          notifyLineListeners(line);
+          //console.log("DATA LINE:", JSON.stringify(line));
+        }
+
+        // Save the incomplete tail (if any)
+        dataBuffer = parts[parts.length - 1];
+
+      } catch (err) {
+        console.error("Error processing data socket input:", err);
+      }
+    });
+
+    dataSocket.on('error', (err) => {
+      logToRenderer('error', `Data socket error: ${err.message}`);
+      done(err);
+    });
+
+    dataSocket.on('close', () => {
+      logToRenderer('info', 'Data socket closed');
+    });
+  });
+});
+
+//----------------------YAPP SEND LOGIC----------------------//
+function setInYappSend(val) {
+  console.log("setInYappSend", val);
+  if (inYappSend !== val) {
+    inYappSend = val;
+  }
+}
+
+function beginYappSendStateMachine(fileName, fileSize, fileBytes) {
+  console.log("YAPP SEND MODE ACTIVATED");
+
+  const enq = Buffer.from([0x05, 0x01]);
+  sendRawBytes(enq);
+
+  yappSend = {
+    fileName,
+    fileSize,
+    fileBytes,
+    offset: 0,
+    phase: "waitingAckEnq",
+    ackTimeout: null,
+    startAckTimer,
+    finishSend,
+    abortSend,
+    sendNextBlock
+  };
+
+  yappSend.startAckTimer();
+
+  function startAckTimer() {
+    clearTimeout(yappSend.ackTimeout);
+    yappSend.ackTimeout = setTimeout(() => {
+      yappSend.abortSend("ACK timeout");
+    }, 20000);
+  }
+
+  let lastProgressUpdate = 0;
+
+  function sendNextBlock() {
+    if (yappSend.offset >= yappSend.fileBytes.length) {
+      yappSend.phase = "waitingAckEof";
+      yappSend.startAckTimer();
+      return;
+    }
+
+    const remaining = yappSend.fileBytes.length - yappSend.offset;
+    const chunk = yappSend.fileBytes.slice(
+      yappSend.offset,
+      yappSend.offset + YAPP_BLOCK_SIZE
+    );
+
+    const isFinal = chunk.length === remaining;
+
+    const block = buildYappDataBlock(chunk, isFinal);
+    sendRawBytes(block);
+
+    yappSend.offset += chunk.length;
+
+    const now = Date.now();
+    if (now - lastProgressUpdate > 100) {
+      sendProgressToRenderer(yappSend.offset, yappSend.fileBytes.length);
+      lastProgressUpdate = now;
+    }
+
+    if (!isFinal) {
+      setImmediate(sendNextBlock);   // ← THIS IS THE FIX
+    }
+  }
+
+  function finishSend() {
+    try {
+      clearTimeout(yappSend.ackTimeout);
+
+      const name = yappSend.fileName;
+      setInYappSend(false);
+      yappSend = null;
+
+      logToRenderer("info", `YAPP file send complete: ${name}`);
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send("yapp:send-complete");
+      }
+    } catch (err) {
+      console.error("finishSend error:", err);
+    }
+  }
+
+  function abortSend(reason) {
+    clearTimeout(yappSend.ackTimeout);
+    setInYappSend(false);
+    yappSend = null;
+
+    logToRenderer("error", `YAPP send aborted: ${reason}`);
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.send("yapp:send-error", { message: reason });
+    }
+  }
+}
+//----------------------YAPP RECEIVE LOGIC----------------------//
+
+// Is this needed
+const YappState = {
+  IDLE: "IDLE",
+  HEADER: "HEADER",
+  DATA: "DATA",
+  EOF: "EOF",
+  DONE: "DONE"
+};
+
+class YappReceiver {
+  constructor(sendFn, saveDirectory) {
+    this.send = sendFn;
+    this.dir = saveDirectory;
+    this.state = "WAIT_SI";
+    this.buffer = [];
+    this.file = null;
+    this.filename = "";
+    this.filesize = 0;
+    this.received = 0;
+  }
+
+  feed(bytes) {
+    // Push the entire chunk at once
+    this.buffer.push(...bytes);
+    console.log("BYTES RECEIVED:", bytes.length, "Buffer length now:", this.buffer.length);
+    // Process as much as possible from this chunk
+    while (true) {
+      const before = this.buffer.length;
+      this.process();
+      const after = this.buffer.length;
+      console.log(`YAPP Receiver: processed data, buffer length before=${before}, after=${after}`);
+      // If no bytes were consumed, stop
+      if (after === before) break;
+    }
+  }
+
+  process() {
+    if (this.buffer.length === 0) return;
+    //console.log("PROCESS STATE:", this.state, "BYTE:", this.buffer[0].toString(16));
+
+    switch (this.state) {
+      case "WAIT_SI":
+        if (this.buffer[0] === 0x05) { // ENQ
+          this.buffer.shift();
+          this.sendRR();
+          this.state = "WAIT_HEADER";
+        }
+        else if (this.buffer[0] === 0x01) { // SOH without ENQ
+          console.log("YAPP: SOH received without ENQ — starting new header");
+          this.state = "WAIT_HEADER";
+        }
+        break;
+
+      case "WAIT_HEADER":
+        if (this.buffer[0] === 0x01) { // SOH
+          const headerComplete = this.parseHeader();
+          if (headerComplete) {
+            this.state = "RECEIVE_DATA";
+          }
+        }
+        break;
+
+      case "RECEIVE_DATA":
+        if (this.buffer[0] === 0x02) { // STX
+          this.parseDataPacket();
+        } else if (this.buffer[0] === 0x03) { // ETX
+          this.buffer.shift();
+          this.finishFile();
+          this.state = "DONE";
+        }
+        break;
+
+      case "DONE":
+        if (this.buffer.length === 0) break;
+
+        const b = this.buffer[0];
+
+        if (b === 0x04) {          // EOT
+          console.log("DONE: EOT received");
+          this.buffer.shift();   // consume EOT
+          this.sendAT();         // tell BPQ we're done with YAPP
+
+          console.log("YAPP session complete - returning to normal mode");
+          inYapp = false;
+          mainWindow.webContents.send("yapp:receive-complete");
+          this.state = "IDLE";
+        }
+        else if (b === 0x01) {     // SI
+          console.log("DONE: SI received, ignoring (staying in DONE until EOT)");
+          this.buffer.shift();   // just discard, stay in DONE
+        }
+        else if (b === 0x06) {     // VARA echo ACK
+          console.log("DONE: VARA echo ACK, discarding");
+          this.buffer.shift();
+        }
+        else {
+          console.log("DONE: unexpected byte", b, "discarding");
+          this.buffer.shift();
+        }
+        break;
+
+      case "IDLE":
+        if (this.buffer[0] === 0x01) { // SI
+          console.log("NEW YAPP SESSION STARTING");
+          this.resetForNextFile();
+          this.buffer.shift();
+          this.state = "WAIT_SI";
+        }
+        break;
+    }
+  }
+
+  resetForNextFile() {
+    this.buffer = [];
+    this.file = null;
+    this.filename = "";
+    this.filesize = 0;
+    this.received = 0;
+  }
+
+  parseHeader() {
+    // Find the LAST SOH (0x01) in the buffer
+    const sohIndex = this.buffer.lastIndexOf(0x01);
+    if (sohIndex === -1) {
+      console.log("HEADER: no SOH yet");
+      return false;
+    }
+
+    // Need at least SOH + LEN
+    if (this.buffer.length < sohIndex + 2) {
+      console.log("HEADER: waiting for LEN after SOH...");
+      return false;
+    }
+
+    const len = this.buffer[sohIndex + 1];
+
+    // Need full header: SOH + LEN + len bytes
+    if (this.buffer.length < sohIndex + 2 + len) {
+      console.log("HEADER: waiting for full header bytes...");
+      return false;
+    }
+
+    // Drop everything up to this SOH
+    this.buffer.splice(0, sohIndex); // discard leading bytes (including old 0x01 from ENQ)
+    this.buffer.shift();             // SOH
+    this.buffer.shift();             // LEN
+
+    const headerBytes = this.buffer.splice(0, len);
+
+    const headerString = new TextDecoder().decode(new Uint8Array(headerBytes));
+    console.log("HEADER RECEIVED:", JSON.stringify(headerString));
+
+    const parts = headerString.split("\0");
+    this.filename = parts[0] || "";
+    this.filesize = parseInt(parts[1] || "0", 10);
+
+    console.log("Parsed filename:", this.filename);
+    console.log("Parsed filesize:", this.filesize);
+
+    if (!this.filename) {
+      console.log("HEADER: empty filename, NOT opening file");
+      return false;
+    }
+
+    const fs = require("fs");
+    const path = require("path");
+    //const filePath = path.join(this.dir, this.filename);
+
+    const settings = loadSettings();  // load fresh copy
+    const receiveDir = settings.yappReceiveDir || path.join(app.getPath("documents"), "YAPP");
+
+    const filePath = path.join(receiveDir, this.filename);
+
+    console.log("Opening file:", filePath);
+    this.file = fs.createWriteStream(filePath);
+
+    this.sendRF();
+    return true;
+  }
+
+  parseDataPacket() {
+    if (this.buffer.length < 2) {
+      //console.log("DATA: waiting for STX + LEN...");
+      return;
+    }
+
+    const stx = this.buffer[0];
+    let len = this.buffer[1];
+
+    if (stx !== 0x02) {
+      //console.log("DATA: unexpected STX:", stx);
+      return;
+    }
+
+    if (len === 0) len = 256;
+
+    if (this.buffer.length < 2 + len) {
+      //console.log("DATA: waiting for full data block...", this.buffer.length, "of", 2 + len);
+      return;
+    }
+
+    this.buffer.shift();
+    this.buffer.shift();
+
+    const data = this.buffer.splice(0, len);
+
+    this.file.write(Buffer.from(data));
+    this.received += data.length;
+
+    //console.log(`DATA: wrote ${data.length} bytes, total ${this.received}/${this.filesize}`);
+
+    updateRecvProgress(this.received, this.filesize);
+
+    this.sendAF();
+  }
+
+  finishFile() {
+    this.file.close();
+    this.sendAF();
+  }
+
+  sendRR() { console.log("SENDING RR (ACK 01)"); this.send(Buffer.from([0x06, 0x01])); }
+  sendRF() { console.log("SENDING RF (NAK 02)"); this.send(Buffer.from([0x06, 0x02])); }
+  sendAF() { console.log("SENDING AF (ACK 03)"); this.send(Buffer.from([0x06, 0x03])); }
+  sendAT() { console.log("SENDING AT (EOT 04)"); this.send(Buffer.from([0x06, 0x04])); }
+}
+//---------------------------------------------------------------------------//
+// END OF YAPP Receiver IMPLEMENTATION
+//---------------------------------------------------------------------------//
+
+/**
+ * Send a command line to VARA command port
+ */
+ipcMain.handle("vara-send-command", async (_event, line) => {
+  if (!cmdSocket) {
+    throw new Error('Not connected to command port');
+  }
+  cmdSocket.write(line.endsWith('\r\n') ? line : line + '\r\n');
+});
+
+/**
+ * Send data (e.g., email text) to VARA data port
+ */
+ipcMain.handle("vara-send-data", async (_event, text) => {
+  if (!dataSocket) {
+    throw new Error('Not connected to data port');
+  }
+  dataSocket.write(text);
+});
+
+ipcMain.handle("vara-disconnect", async () => {
+  if (cmdSocket) cmdSocket.end();
+  if (dataSocket) dataSocket.end();
+});
+
+ipcMain.handle("settings:get", async () => {
+  return loadSettings();
+});
+
+ipcMain.handle("settings:set", async (_event, data) => {
+  const settings = loadSettings();
+  const newSettings = { ...settings, ...data };
+  fs.writeFileSync(settingsPath, JSON.stringify(newSettings, null, 2));
+});
+
+ipcMain.handle("settings:get-one", async (_event, key) => {
+  const settings = loadSettings();   // load fresh copy
+  return settings[key];
+});
+
+ipcMain.handle("settings:save", async (_event, { key, value }) => {
+  const settings = loadSettings();
+  settings[key] = value;
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+});
+
+ipcMain.handle("messages:get-all", () => {
+  return db.prepare("SELECT * FROM messages WHERE deleted=0").all();
+});
+
+ipcMain.handle("messages:get-by-id", (event, id) => {
+  return db.prepare("SELECT * FROM messages WHERE id=?").get(id);
+});
+
+ipcMain.handle("messages:get-by-msgnum", (event, msgNum) => {
+  return db.prepare("SELECT * FROM messages WHERE msgNum=?").get(msgNum);
+});
+
+ipcMain.handle("messages:mark-read", (event, id) => {
+  db.prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
+});
+
+ipcMain.handle("messages:mark-saved", (_event, msgNum) => {
+  markMessageSaved(msgNum);
+});
+
+ipcMain.handle("outbox:save", (_event, message) => {
+  return saveOutboxMessage(message);
+});
+
+ipcMain.handle("bbs:send-message", async (_event, msg) => {
+  await uploadSingleMessage(msg);
+  return true;
+});
+
+/* ipcMain.handle("bbs:receive-messages", async () => {
+  await ensureVaraConnected();
+  await ensureBbsConnected();
+  await uploadOutboxMessages();
+  // Trigger LIST mode
+  dataSocket.write("L\r");
+
+  return true;
+}); */
+
+ipcMain.handle("bbs:get-bulletin-categories", () => {
+  const rows = db.prepare(`
+        SELECT TRIM(recipient) AS category, COUNT(*) AS count
+        FROM messages
+        WHERE type='bulletin'
+        GROUP BY TRIM(recipient)
+        ORDER BY category ASC
+    `).all();
+
+  return rows;   // now returns [{category:"WX", count:12}, ...]
+});
+
+ipcMain.on("bbs:filter-bulletins", (event, category) => {
+  let rows;
+
+  if (category === "ALL") {
+    rows = db.prepare(`
+            SELECT * FROM messages
+            WHERE type='bulletin'
+            ORDER BY msgNum DESC
+        `).all();
+  } else {
+    rows = db.prepare(`
+            SELECT * FROM messages
+            WHERE type='bulletin'
+              AND TRIM(recipient) = ?
+            ORDER BY msgNum DESC
+        `).all(category);
+  }
+  console.log("Filtering bulletins for category:", category, "rows:", rows.length);
+  event.sender.send("bbs:bulletin-list", rows);
+});
+
+ipcMain.on("bbs:read-message", (event, msgNum) => {
+  currentReadMsgNum = msgNum;
+  currentReadBody = [];
+  readBuffer = "";
+
+  inReadMode = true;   // ⭐ START READ MODE HERE
+
+  if (dataSocket) dataSocket.write(`R ${msgNum}\r`);
+});
+
+ipcMain.on("bbs:send-command", (event, cmd) => {
+  console.log("MAIN: sending to DATA port:", cmd);
+  console.log("Sending BBS command:", cmd, "via DATA socket");
+  if (cmd.startsWith("L")) {
+    messageListMode = "bbs";
+    listBuffer = "";
+  }
+  if (dataSocket) dataSocket.write(cmd + "\r");
+});
+
+ipcMain.on("menu:show-message-context", (event, data) => {
+  const menu = new Menu();
+
+  menu.append(new MenuItem({
+    label: "Reply to Sender",
+    click: () => {
+      event.sender.send("reply-to-sender", data);
+    }
+  }));
+
+  menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
+});
+
+
+ipcMain.handle("bbs:send-receive", async () => {
+  await ensureVaraConnected();
+  await ensureBbsConnected();
+  await uploadOutboxMessages();
+
+  // Trigger LIST mode
+  dataSocket.write("L\r");
+
+  return true;
+});
+
+
+ipcMain.handle("messages:reply-to", (_event, msgNum) => {
+  const msg = db.prepare("SELECT * FROM messages WHERE msgNum = ?").get(msgNum);
+  return msg;
+});
+
+
+ipcMain.handle("messages:save-outbox", (_event, message) => {
+  return saveOutboxMessage(message);
+});
+
+ipcMain.handle("messages:save", (_event, message) => {
+  return saveMessage(message);
+});
+
+
+
+
+
+
+ipcMain.on('whitepages-start', () => {
+  whitePagesMode = true;
+  whitePagesResults = [];
+});
+
+ipcMain.on('yapp:receive-start', async (event, info) => {
+  const { filename, directory } = info;
+
+  try {
+    // 1. Tell BPQ to start sending the file
+    dataSocket.write(`YAPP ${filename}\r`);
+
+    // 2. Create the YAPP receiver
+    yappReceiver = new YappReceiver(sendRawBytes, directory);
+
+    console.log("Receiver created. sendRawBytes type:", typeof sendRawBytes);
+    console.log("Receiver.send type:", typeof yappReceiver.send);
+
+    inYapp = true;
+
+    console.log("YAPP receive started for:", filename);
+
+  } catch (err) {
+    console.error("Error starting YAPP receive:", err);
+    inYapp = false;
+  }
+});
+
+ipcMain.on("yapp:request-file-list", () => {
+
+  console.log("YAPP: Requesting FILES list...");
+  if (dataSocket) {
+    inFileList = true;
+    fileList = [];
+    console.log("YAPP: inFileList = true, sending FILES");
+    dataSocket.write("FILES\r");
+  } else {
+    console.log("YAPP: dataSocket is NULL");
+  }
+});
+
+ipcMain.handle('address-book:save', (_event, entry) => {
+
+  if (entry.preserveNotes) {
+    // WP import: do NOT overwrite notes
+    db.prepare(`
+      INSERT INTO address_book (callsign, homebbs, name, zipcode, address)
+      VALUES (@callsign, @homebbs, @name, @zipcode, @address)
+      ON CONFLICT(callsign) DO UPDATE SET
+          homebbs = excluded.homebbs,
+          name = excluded.name,
+          zipcode = excluded.zipcode,
+          address = excluded.address
+    `).run(entry);
+  } else {
+    // Manual edit: update everything including notes
+    db.prepare(`
+      INSERT INTO address_book (callsign, homebbs, name, zipcode, address, notes)
+      VALUES (@callsign, @homebbs, @name, @zipcode, @address, @notes)
+      ON CONFLICT(callsign) DO UPDATE SET
+          homebbs = excluded.homebbs,
+          name = excluded.name,
+          zipcode = excluded.zipcode,
+          address = excluded.address,
+          notes = excluded.notes
+    `).run(entry);
+  }
+
+  return { success: true, entry };
+});
+
+ipcMain.handle('address-book:get', () => {
+  const stmt = db.prepare(`SELECT * FROM address_book ORDER BY callsign`);
+  return stmt.all();
+});
+
+ipcMain.handle("address-book:delete", (event, id) => {
+  db.prepare("DELETE FROM address_book WHERE id = ?").run(id);
+  return { success: true, id };
+});
+
+ipcMain.handle("address-book:get-one", (event, id) => {
+  return db.prepare("SELECT * FROM address_book WHERE id = ?").get(id);
+});
+
+ipcMain.handle("address-book:search", (event, prefix) => {
+  const query = `${prefix}%`;
+  return db.prepare("SELECT * FROM address_book WHERE callsign LIKE ? OR name LIKE ? ORDER BY callsign").all(query, query);
+});
+
+// Note: this uses the same 'save' logic as add, but requires the ID to be present in the entry
+ipcMain.handle("address-book:update", (event, entry) => {
+  db.prepare(`
+    UPDATE address_book
+    SET callsign=@callsign,
+        homebbs=@homebbs,
+        name=@name,
+        zipcode=@zipcode,
+        address=@address,
+        notes=@notes
+    WHERE id=@id
+  `).run(entry);
+
+  return { success: true, entry };
+});
+
+
+
+// Buffer utilities for YAPP send/receive
+ipcMain.handle("buffer-alloc", (_e, size) => {
+  return Buffer.alloc(size);
+});
+
+ipcMain.handle("buffer-from-array", (_e, arr) => {
+  return Buffer.from(arr);
+});
+
+ipcMain.handle("buffer-concat", (_e, list) => {
+  return Buffer.concat(list);
+});
+
+//----------------------YAPP SEND LOGIC----------------------//
+// This is the main entry point for starting a YAPP send operation. 
+// It receives the file info and bytes from the renderer, 
+// then initiates the YAPP send state machine.
+// ----------------------------------------------------------//
+
+ipcMain.on("yapp:send-start", (event, info) => {
+  //inYappSend = true;
+  setInYappSend(true);
+  yappSend = null;
+
+  console.log("IPC: yapp:send-start received", { stack: new Error().stack });
+
+  const { fileName, fileSize, fileBytes } = info;
+
+  if (!dataSocket) {
+    logToRenderer("error", "Cannot start YAPP send: data socket not connected.");
+    return;
+  }
+
+  logToRenderer("info", `Starting YAPP send: ${fileName} (${fileSize} bytes)`);
+
+  // Convert Uint8Array → Buffer
+  const buffer = Buffer.from(fileBytes);
+
+  // Start the state machine
+  beginYappSendStateMachine(fileName, fileSize, buffer);
+});
+
+ipcMain.handle("yapp:send-file", async (_event, filePath) => {
+  try {
+    const data = await fs.promises.readFile(filePath);
+    return data;
+  } catch (err) {
+    console.error("Failed to read file:", err);
+    return null;
+  }
+});
+
+console.log("DB Path:", dbPath);
+
+ipcMain.handle("address-book:debug", () => {
+  return db.prepare("SELECT * FROM address_book").all();
+});
+//----------------------END OF YAPP SEND LOGIC----------------------//

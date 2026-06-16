@@ -1,5 +1,26 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Central dispatcher to avoid creating many ipcRenderer listeners (prevents memory leak warnings)
+const _channelCallbacks = new Map();
+function _subscribe(channel, callback) {
+    if (!_channelCallbacks.has(channel)) {
+        _channelCallbacks.set(channel, []);
+        ipcRenderer.on(channel, (_e, data) => {
+            const list = _channelCallbacks.get(channel) || [];
+            for (const cb of list.slice()) {
+                try { cb(data); } catch (err) { console.error('Handler error for', channel, err); }
+            }
+        });
+    }
+    _channelCallbacks.get(channel).push(callback);
+    return () => {
+        const arr = _channelCallbacks.get(channel);
+        if (!arr) return;
+        const idx = arr.indexOf(callback);
+        if (idx >= 0) arr.splice(idx, 1);
+    };
+}
+
 //
 // VARA RADIO API
 //
@@ -48,14 +69,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onToggleVaraConsole: (callback) =>
         ipcRenderer.on("ui:toggle-vara-console", (_e, visible) => callback(visible)),
 
+    onOpenPreferences: (callback) =>
+        ipcRenderer.on("ui:open-preferences", callback),
+
     onOpenBbsHelp: (callback) =>
         ipcRenderer.on("ui:open-bbs-help", callback),
 
     onOpenAbout: (callback) =>
         ipcRenderer.on("ui:open-about", callback),
 
+    // Toast notifications from main
     onToast: (callback) =>
         ipcRenderer.on("ui:toast", (_e, text) => callback(text)),
+
+    // Use for sending toast requests from renderer to main (e.g. from settings page)
+    showToast: (text) => ipcRenderer.send("ui:toast", text),
+    
 
     //
     // MESSAGE LIST / DB ACCESS
@@ -227,7 +256,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.on("yapp:open-receive", callback),
 
     onYappRecvProgress: (callback) =>
-        ipcRenderer.on("yapp:recv-progress", callback),
+        ipcRenderer.on("yapp:recv-progress", (_e, data) => callback(data)),
 
     onYappReceiveComplete: (callback) =>
         ipcRenderer.on("yapp:receive-complete", callback),
@@ -248,7 +277,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.invoke("yapp:send-file", filePath),
 
     onYappSendProgress: (callback) =>
-        ipcRenderer.on("yapp:send-progress", (_e, data) => callback(data))
+        _subscribe("yapp:send-progress", callback),
+
+    onVaraBuffer: (callback) =>
+        _subscribe("vara:buffer", callback)
 
 });
 

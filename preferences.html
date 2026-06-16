@@ -133,12 +133,16 @@
   <button id="saveBtn">Save</button>
   <br>
   <h2>Bulletin Subscriptions</h2>
-  <div id="subscriptionList" class="category-list"></div>>
+  <div id="subscriptionList" class="category-list"></div>
 
   <button id="saveSubscriptionsBtn">Save Subscriptions</button>
 
   <script>
-    window.addEventListener('DOMContentLoaded', async () => {
+    window.addEventListener("DOMContentLoaded", async () => {
+
+      //
+      // Load main settings
+      //
       const s = await window.settings.get();
 
       myCall.value = s.myCall;
@@ -151,7 +155,7 @@
       varaDataPort.value = s.varaDataPort;
       yappDirInput.value = s.yappReceiveDir || "";
 
-      saveBtn.addEventListener('click', async () => {
+      saveBtn.addEventListener("click", async () => {
         await window.settings.set({
           myCall: myCall.value,
           bbsCall: bbsCall.value,
@@ -166,18 +170,23 @@
 
         window.close();
       });
-    });
 
-    document.getElementById("yappDirButton").addEventListener("click", async () => {
-      const dir = await window.electronAPI.pickDirectory();
-      if (dir) {
-        document.getElementById("yappDirInput").value = dir;
-        window.electronAPI.saveSetting("yappReceiveDir", dir);
-      }
-    });
 
-    document.addEventListener("DOMContentLoaded", async () => {
-      // Load categories from main
+      //
+      // YAPP directory picker
+      //
+      document.getElementById("yappDirButton").addEventListener("click", async () => {
+        const dir = await window.electronAPI.pickDirectory();
+        if (dir) {
+          yappDirInput.value = dir;
+          window.settings.saveSetting("yappReceiveDir", dir);
+        }
+      });
+
+
+      //
+      // Load bulletin categories + subscriptions
+      //
       const categories = await window.electronAPI.getBulletinCategories();
       const subs = await window.settings.getSetting("subscriptions") || [];
 
@@ -188,26 +197,34 @@
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
-        checkbox.value = cat.category;   // ← FIXED
+        checkbox.value = cat.category;
         checkbox.checked = subs.includes(cat.category);
 
         const label = document.createElement("label");
-        label.textContent = `${cat.category} (${cat.count})`;  // ← FIXED
+        label.textContent = `${cat.category} (${cat.count})`;
 
         row.appendChild(checkbox);
         row.appendChild(label);
         container.appendChild(row);
       });
 
-      // Save button
+
+      //
+      // Save subscriptions
+      //
       document.getElementById("saveSubscriptionsBtn").addEventListener("click", async () => {
         const selected = [...container.querySelectorAll("input[type=checkbox]:checked")]
           .map(cb => cb.value);
 
         await window.settings.saveSetting("subscriptions", selected);
 
-        window.electronAPI.onToast("Subscriptions saved");
+        // Toast (if you want)
+        window.electronAPI.showToast?.("Subscriptions saved");
+
+        // Close window (optional)
+        // window.close();
       });
+
     });
   </script>
 </body>

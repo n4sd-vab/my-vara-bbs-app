@@ -38,7 +38,7 @@ class BbsProtocol {
   setSubscriptions(list) {
     this.subscriptions = list;
     console.log("BBS Protocol: Subscriptions updated:", this.subscriptions);
-    this.sendToRenderer("ui:toast", "Bulletin subscriptions updated: " + this.subscriptions.join(", "));
+    //this.sendToRenderer("ui:toast", "Bulletin subscriptions updated: " + this.subscriptions.join(", "));
   }
 
   // Connection and status
@@ -116,7 +116,7 @@ class BbsProtocol {
 
     //await this.sendKillCommandIfNeeded();
 
-    // FAST SYNC: only get NEW private and bulletin messages
+    // FAST SYNC: only get NEW messages
     this.endOfFileList = false;
     this.messageListMode = "bbs";
     this.sendToRenderer("ui:toast", "Checking for new messages...");
@@ -141,7 +141,7 @@ class BbsProtocol {
       await this.waitForReadModeToFinish();
     }
 
-    // ** NOT WORKING ** Send event to refresh the message list in renderer
+    // Send event to refresh the message list in renderer
     this.sendToRenderer("messages:received", { downloaded: toDownload.length });
 
     return { downloaded: toDownload.length };

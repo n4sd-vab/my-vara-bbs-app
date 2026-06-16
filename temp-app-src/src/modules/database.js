@@ -212,22 +212,20 @@ class DatabaseManager {
     return this.db.prepare("SELECT * FROM messages WHERE folder = 'outbox' ").all();
   }
 
-  // V.25 body is already saved in the outbox, so just update the header fields and move to sent folder
-  updateOutboxMessageSent(id, msgNum, size, date, datePosted) {  
+  updateOutboxMessageSent(id, msgNum, size, date, datePosted) {
     console.log("Updating outbox message as sent:", { id, msgNum, size, date, datePosted });
     this.db.prepare(`
       UPDATE messages
-      SET msgNum = ?, size = ?, folder = 'sent', date = ?, datePosted = ?, downloaded = 1
+      SET msgNum = ?, size = ?, folder = 'outbox', date = ?, datePosted = ?
       WHERE id = ?
     `).run(msgNum, size, date, datePosted, id);
   }
 
   updateMessageSent(id, msgNum, size, date, datePosted) {
-    // This is used for messages sent directly from the message view (not via the outbox)
     console.log("Updating direct message as sent:", { id, msgNum, size, date, datePosted });
     this.db.prepare(`
       UPDATE messages
-      SET msgNum = ?, size = ?, folder = 'sent', date = ?, datePosted = ?, downloaded = 1
+      SET msgNum = ?, size = ?, folder = 'sent', date = ?, datePosted = ?
       WHERE id = ?
     `).run(msgNum, size, date, datePosted, id);
   }
