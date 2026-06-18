@@ -16,6 +16,9 @@ class YappTransfer extends EventEmitter {
     this.yappSend = null;
     this.inFileList = false;
     this.fileList = [];
+    this.yappReplyBuffer = null;
+    this.yappReplyTimer = null;
+    this.yappReplyMode = false;
   }
 
   // YAPP Receive functionality
@@ -96,6 +99,9 @@ class YappTransfer extends EventEmitter {
   startSend(fileName, fileSize, fileBytes) {
     this.inYappSend = true;
     this.yappSend = null;
+    this.yappReplyMode = false;
+    this.yappReplyBuffer = null;
+    this.clearYappReplyTimer();
 
     console.log("IPC: yapp-start-send received");
 
@@ -252,6 +258,55 @@ class YappTransfer extends EventEmitter {
     });
   }
 
+  sendYappStatusToRenderer(message) {
+    if (!message) return;
+    this.sendToRenderer("yapp:send-status", message);
+  }
+
+  clearYappReplyTimer() {
+    if (this.yappReplyTimer) {
+      clearTimeout(this.yappReplyTimer);
+      this.yappReplyTimer = null;
+    }
+  }
+
+  startYappReplyTimer() {
+    this.clearYappReplyTimer();
+    this.yappReplyTimer = setTimeout(() => {
+      if (this.yappReplyBuffer && this.yappReplyBuffer.length > 0) {
+        const text = this.yappReplyBuffer.toString("utf8").trim();
+        if (text) this.sendYappStatusToRenderer(text);
+      }
+      this.yappReplyBuffer = null;
+      this.yappReplyMode = false;
+    }, 5500);
+  }
+
+  appendYappReplyData(data) {
+    if (!Buffer.isBuffer(data)) data = Buffer.from(data);
+    this.yappReplyBuffer = this.yappReplyBuffer
+      ? Buffer.concat([this.yappReplyBuffer, data])
+      : Buffer.from(data);
+
+    const message = this.extractYappReplyMessage();
+    if (message) {
+      this.sendYappStatusToRenderer(message);
+      this.yappReplyBuffer = null;
+      this.yappReplyMode = false;
+      this.clearYappReplyTimer();
+    } else {
+      this.startYappReplyTimer();
+    }
+  }
+
+  extractYappReplyMessage() {
+    if (!this.yappReplyBuffer || this.yappReplyBuffer.length === 0) return null;
+    const text = this.yappReplyBuffer.toString("utf8");
+    const match = text.match(/Yapp file .+?received/i);
+    if (match) return match[0].trim();
+    return null;
+  }
+
   // Utility methods
   logToRenderer(type, msg) {
     const windows = BrowserWindow.getAllWindows();
@@ -351,10 +406,23 @@ class YappTransfer extends EventEmitter {
       // 06 04 — EOT ACK, done
       if (code === 0x04 && this.yappSend.phase === "waitingAckEot") {
         clearTimeout(this.yappSend.ackTimeout);
-        this.yappSend.finishSend();
+        this.yappReplyMode = true;
+        this.yappReplyBuffer = Buffer.alloc(0);
+        const replyPayload = data.slice(2);
+        if (replyPayload.length > 0) {
+          this.appendYappReplyData(replyPayload);
+        } else {
+          this.startYappReplyTimer();
+        }
+        setImmediate(() => this.yappSend.finishSend());
         return;
       }
 
+      return;
+    }
+
+    if (this.yappReplyMode) {
+      this.appendYappReplyData(data);
       return;
     }
 
@@ -381,6 +449,7 @@ class YappTransfer extends EventEmitter {
 
 // YAPP Constants
 const YAPP_BLOCK_SIZE = 255; // or 256 with len=0
+const YAPP_RECV_PROGRESS_STEP_PERCENT = 5;
 
 // YAPP Header and Data Block builders
 function buildYappHeader(filename, fileSize) {
@@ -443,6 +512,7 @@ class YappReceiver extends EventEmitter {
     this.filename = "";
     this.filesize = 0;
     this.received = 0;
+    this.lastProgressBucket = -1;
   }
 
   feed(bytes) {
@@ -569,6 +639,7 @@ class YappReceiver extends EventEmitter {
     this.filename = "";
     this.filesize = 0;
     this.received = 0;
+    this.lastProgressBucket = -1;
   }
 
   parseHeader() {
@@ -627,6 +698,14 @@ class YappReceiver extends EventEmitter {
     this.file = fs.createWriteStream(filePath);
     this.fullPath = filePath;
 
+    this.lastProgressBucket = 0;
+    setImmediate(() => {
+      const windows = BrowserWindow.getAllWindows();
+      if (windows.length > 0) {
+        windows[0].webContents.send("yapp:recv-progress", { received: 0, total: this.filesize, percent: 0 });
+      }
+    });
+
     this.sendRF();
     return true;
   }
@@ -657,14 +736,27 @@ class YappReceiver extends EventEmitter {
     this.file.write(Buffer.from(data));
     this.received += data.length;
 
-    // Update progress
-    const percent = Math.floor((this.received / this.filesize) * 100);
-    setImmediate(() => {
-      const windows = BrowserWindow.getAllWindows();
-      if (windows.length > 0) {
-        windows[0].webContents.send("yapp:recv-progress", { received: this.received, total: this.filesize, percent });
-      }
-    });
+    // Update progress in coarse buckets (5%) to keep transfer path prioritized.
+    const totalNow = this.filesize > 0 ? this.filesize : 0;
+    const receivedNow = this.received;
+    const percentRaw = totalNow > 0 ? Math.floor((receivedNow / totalNow) * 100) : 0;
+    const bucket = percentRaw >= 100
+      ? 100
+      : Math.floor(percentRaw / YAPP_RECV_PROGRESS_STEP_PERCENT) * YAPP_RECV_PROGRESS_STEP_PERCENT;
+
+    if (bucket !== this.lastProgressBucket) {
+      this.lastProgressBucket = bucket;
+      setImmediate(() => {
+        const windows = BrowserWindow.getAllWindows();
+        if (windows.length > 0) {
+          windows[0].webContents.send("yapp:recv-progress", {
+            received: receivedNow,
+            total: totalNow,
+            percent: bucket
+          });
+        }
+      });
+    }
 
     this.sendAF();
   }

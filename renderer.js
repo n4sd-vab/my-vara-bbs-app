@@ -65,6 +65,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     let lastYappSendConfirmedBytes = -1;
     let currentYappTotal = 0;
     let lastVaraBuffer = null;
+    let yappSendCloseTimer = null;
+    let yappSendCompleted = false;
+    let yappSendReplyDetected = false;
+    const YAPP_SEND_MODAL_CLOSE_DELAY_MS = 5000;
+    const YAPP_SEND_MODAL_REPLY_CLOSE_DELAY_MS = 2500;
 
     const addCallsign = document.getElementById('addCallsign');
     const addName = document.getElementById('addName');
@@ -702,9 +707,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         ].join(" ");
     }
 
-    window.electronAPI.onToast((text) => {
-        showToast(text);
-    });
+    //window.electronAPI.onToast((text) => {
+    //   showToast(text);
+    //});
 
     window.showToast = function (text) {
         const container = document.getElementById("toastContainer");
@@ -995,8 +1000,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                 .map(cb => cb.value);
 
             await window.settings.saveSetting("subscriptions", selected);
+    
+            closePreferencesModal();
 
-            window.electronAPI.showToast?.("Subscriptions saved");
+            window.showToast("Subscriptions saved");
         });
     }
 
@@ -1008,6 +1015,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 
     function resetYappSendModal() {
+        if (yappSendCloseTimer) {
+            clearTimeout(yappSendCloseTimer);
+            yappSendCloseTimer = null;
+        }
+        yappSendCompleted = false;
+        yappSendReplyDetected = false;
+
         // Show file picker
         document.getElementById("yappPickerSection").style.display = "block";
 
@@ -1018,11 +1032,37 @@ window.addEventListener('DOMContentLoaded', async () => {
         document.getElementById("yappSendProgressBar").style.width = "0%";
         document.getElementById("yappSendQueuedBar").style.width = "0%";
         document.getElementById("yappSendProgressText").innerText = "0%";
+        // Do NOT clear status text here - let it persist to show final message
 
         // Clear file path
         document.getElementById("yappModalSendFile").value = "";
         lastYappSendPercent = -1;
         lastYappSendQueuedPercent = -1;
+    }
+
+    function scheduleYappSendModalClose(delayMs) {
+        if (yappSendCloseTimer) {
+            clearTimeout(yappSendCloseTimer);
+        }
+
+        yappSendCloseTimer = setTimeout(() => {
+            resetYappSendModal();
+            document.getElementById("yappSendModal").style.display = "none";
+
+            const toast = document.getElementById("yappToast");
+            if (toast) {
+                toast.innerText = "File sent successfully";
+                toast.classList.add("show");
+                setTimeout(() => toast.classList.remove("show"), 4000);
+            } else {
+                window.showToast("File sent successfully");
+            }
+
+            // Reset progress bar
+            document.getElementById("yappSendProgressBar").style.width = "0%";
+            document.getElementById("yappSendProgressText").innerText = "0%";
+            yappSendCloseTimer = null;
+        }, delayMs);
     }
 
     function resetYappRecvModal() {
@@ -1490,6 +1530,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById("yappSendStartBtn").addEventListener("click", async () => {
         await ensureBbsConnected();
         const filePath = document.getElementById("yappModalSendFile").value;
+        yappSendCompleted = false;
+        yappSendReplyDetected = false;
         
         console.log("Starting YAPP send for file:", filePath);
 
@@ -1522,13 +1564,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     // PROGRESS UPDATES (new version with percent)
     // ------------------------------------------------------------
     window.electronAPI.onYappRecvProgress(({ received, total, percent }) => {
-        // Coarse updates: show in 5% steps to reduce UI churn
-        const display = (percent >= 100) ? 100 : Math.floor(percent / 5) * 5;
+        const display = Math.max(0, Math.min(100, Number.isFinite(percent) ? Math.floor(percent) : 0));
         if (display === lastYappRecvPercent) return;
         lastYappRecvPercent = display;
 
-        const pct = display + "%";
-        console.log("Receiver progress:", pct);
+        const pct = `${display}%`;
 
         // Ensure modal/section are visible (some flows close the picker)
         const modal = document.getElementById("yappReceiveModal");
@@ -1543,7 +1583,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         if (bar) {
             bar.style.width = pct;
-            bar.style.minWidth = "2%"; // make very small progress visible
+            bar.style.minWidth = display > 0 ? "2%" : "0%"; // make very small progress visible
             bar.style.background = bar.style.background || "#4caf50";
         }
         if (text) {
@@ -1609,28 +1649,31 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
+    window.electronAPI.onYappSendStatus((message) => {
+        const statusElement = document.getElementById("yappSendStatusText");
+        if (statusElement) {
+            statusElement.innerText = message;
+            statusElement.style.display = message ? "block" : "none";
+        }
+
+        if (/Yapp file .+received/i.test(message || "")) {
+            yappSendReplyDetected = true;
+            if (yappSendCompleted) {
+                scheduleYappSendModalClose(YAPP_SEND_MODAL_REPLY_CLOSE_DELAY_MS);
+            }
+        }
+    });
+
     // ------------------------------------------------------------
     // SEND COMPLETE
     // ------------------------------------------------------------
     window.electronAPI.onYappSendComplete(() => {
-        // Let the final progress update paint
-        setTimeout(() => {
-            resetYappSendModal();
-            document.getElementById("yappSendModal").style.display = "none";
-
-            const toast = document.getElementById("yappToast");
-            if (toast) {
-                toast.innerText = "File sent successfully";
-                toast.classList.add("show");
-                setTimeout(() => toast.classList.remove("show"), 4000);
-            } else {
-                window.showToast("File sent successfully");
-            }
-
-            // Reset progress bar
-            document.getElementById("yappSendProgressBar").style.width = "0%";
-            document.getElementById("yappSendProgressText").innerText = "0%";
-        }, 500); // 300–500ms is perfect
+        yappSendCompleted = true;
+        scheduleYappSendModalClose(
+            yappSendReplyDetected
+                ? YAPP_SEND_MODAL_REPLY_CLOSE_DELAY_MS
+                : YAPP_SEND_MODAL_CLOSE_DELAY_MS
+        );
     });
 
     // -------------------------------------------------------------
@@ -1774,7 +1817,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 
     txInput.addEventListener('keydown', async (e) => {
-        console.log("Key Pressed:", e.key);
+        // console.log("Key Pressed:", e.key);
 
         if (e.key === 'Enter') {
             e.preventDefault();

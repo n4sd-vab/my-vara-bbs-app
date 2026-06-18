@@ -113,8 +113,12 @@ class VaraConnection {
       this.cmdSocket.on('close', () => {
         this.logToRenderer('info', 'Command socket closed');
       });
+      // End of command socket setup
 
+
+      // -------------------------------------------------------------
       // Data socket
+      // -------------------------------------------------------------
       this.dataSocket = net.createConnection({ host: settings.varaIP, port: settings.varaDataPort }, () => {
         this.logToRenderer('info', `Connected to VARA data port ${settings.varaDataPort}`);
         done();
@@ -199,18 +203,6 @@ class VaraConnection {
       }, timeout);
     });
   }
-  //v.18 or something
-/*   notifyLineListeners(line) {
-    console.log("notifyLineListeners GOT:", JSON.stringify(line));
-    for (let i = this.lineWaiters.length - 1; i >= 0; i--) {
-      const waiter = this.lineWaiters[i];
-      console.log("Testing waiter against line:", waiter.regex, JSON.stringify(line));
-      if (waiter.regex.test(line)) {
-        waiter.resolve(line);
-        this.lineWaiters.splice(i, 1);
-      }
-    }
-  } */
 
   // V.22 - change to give waiters first chance to consume the line, and if no waiter consumes it, 
   // then pass to BBS protocol parser    

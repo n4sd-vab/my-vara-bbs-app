@@ -450,7 +450,12 @@ class BbsProtocol {
     }
 
     // Handle YAPP data first
-    if (this.yappTransfer.inYapp || this.yappTransfer.inYappSend || this.yappTransfer.inFileList) {
+    if (
+      this.yappTransfer.inYapp ||
+      this.yappTransfer.inYappSend ||
+      this.yappTransfer.inFileList ||
+      this.yappTransfer.yappReplyMode
+    ) {
       this.yappTransfer.handleData(data);
       return;
     }

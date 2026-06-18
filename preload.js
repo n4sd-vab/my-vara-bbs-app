@@ -279,6 +279,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onYappSendProgress: (callback) =>
         _subscribe("yapp:send-progress", callback),
 
+    onYappSendStatus: (callback) =>
+        _subscribe("yapp:send-status", callback),
+
     onVaraBuffer: (callback) =>
         _subscribe("vara:buffer", callback)
 
