@@ -28,15 +28,31 @@ $(document).ready(function(){
 			var field = $(this).attr("id");
 			data[field] = $(this).val();
 		});
-		data = JSON.stringify(data);
+		var jsonData = JSON.stringify(data, null, 2);
 		var subject = $("#subject").val();
 		if (!subject) { subject = "ICS-213"; }
 
-		var filename = subject + " " + $("#date").val() + " " + $("#time").val() + ".json";
-		filename = prompt("Please enter filename to save as",filename);
+		var defaultName = subject + " " + $("#date").val() + " " + $("#time").val() + ".json";
+
+		if (window.electronAPI && typeof window.electronAPI.saveFile === "function") {
+			window.electronAPI.saveFile({
+				defaultPath: defaultName,
+				content: jsonData,
+				filters: [{ name: "JSON", extensions: ["json"] }]
+			}).then(function(result) {
+				if (result && !result.canceled) {
+					alert("Saved to:\n" + result.filePath);
+				}
+			}).catch(function(error) {
+				alert("Save failed: " + error.message);
+			});
+			return;
+		}
+
+		var filename = prompt("Please enter filename to save as", defaultName);
 		if (filename == null) { return; }
 
-		var new_file = new File([data],filename,{type: "application/json"});
+		var new_file = new File([jsonData],filename,{type: "application/json"});
 		var download_link = document.createElement('a');
 		download_link.style.display = 'none';
 		download_link.href = URL.createObjectURL(new_file);
@@ -46,49 +62,62 @@ $(document).ready(function(){
 		download_link.click();
 	});
 	$("#load-data").on("click", function() {
-		$("#load-file").click();
+		if (window.electronAPI && typeof window.electronAPI.pickFile === "function" && typeof window.electronAPI.readTextFile === "function") {
+			window.electronAPI.pickFile().then(function(filePath) {
+				if (!filePath) { return; }
+				return window.electronAPI.readTextFile(filePath);
+			}).then(function(fileText) {
+				if (!fileText) { return; }
+				var data = {};
+				try {
+					data = JSON.parse(fileText);
+				} catch (error) {
+					alert("Invalid JSON file.");
+					return;
+				}
+				for (const [key, value] of Object.entries(data)) { $("#"+key).val(value); }
+			}).catch(function(error) {
+				alert("Load failed: " + error.message);
+			});
+			return;
+		}
+
+		alert("Load integration is unavailable in this window.");
 	});
-	$("#load-file").on("change", function() {
-		var new_file = $(this)[0].files[0];
-		var file_reader = new FileReader();
-		file_reader.onload = function() {
-			var data = {};
-			try {
-				data = JSON.parse(file_reader.result);
-			} catch (error) {
-				// do nothing
-			}
-			for (const [key, value] of Object.entries(data)) { $("#"+key).val(value); }
-		};
-		file_reader.readAsText(new_file);
-	});
+
+	function buildMessageText() {
+		var messageText = "";
+		messageText += "GENERAL MESSAGE (ICS 213)\n";
+		messageText += "\n";
+		messageText += "1. Incident Name (Optional): " + $("#incident").val() + "\n";
+		messageText += "\n";
+		messageText += "2. To (Name and Position): " + $("#to").val() + "\n";
+		messageText += "\n";
+		messageText += "3. From (Name and Position): " + $("#from").val()  + "\n";
+		messageText += "\n";
+		messageText += "4. Subject: " + $("#subject").val() + "\n";
+		messageText += "\n";
+		messageText += "5. Date: " + $("#date").val() + "\n";
+		messageText += "\n";
+		messageText += "6. Time: " + $("#time").val()  + "\n";
+		messageText += "\n";
+		messageText += "7. Message: " + $("#message").val() + "\n";
+		messageText += "\n";
+		messageText += "8. Approved by: Name: " + $("#sender_name").val() + " Signature: " + $("#sender_signature").val() + " Position/Title: " + $("#sender_position").val() + "\n";
+		messageText += "\n";
+		messageText += "9. Reply: " + $("#reply").val() + "\n";
+		messageText += "\n";
+		messageText += "10. Replied by: Name: " + $("#reply_name").val() + " Signature: " + $("#reply_signature").val() + " Position/Title: " + $("#reply_position").val() + "\n";
+		return messageText;
+	}
 	
 	$("#generate").on("click",function() {
 		$("#dialog").empty();
+		var messageText = buildMessageText();
 	
 		var html = "<pre>";
 		html += '<textarea style="height:100%; width:100%;">';
-		html += "GENERAL MESSAGE (ICS 213)\n";
-		html += "\n";
-		html += "1. Incident Name (Optional): " + $("#incident").val() + "\n";
-		html += "\n";
-		html += "2. To (Name and Position): " + $("#to").val() + "\n";
-		html += "\n";
-		html += "3. From (Name and Position): " + $("#from").val()  + "\n";
-		html += "\n";
-		html += "4. Subject: " + $("#subject").val() + "\n";
-		html += "\n";
-		html += "5. Date: " + $("#date").val() + "\n";
-		html += "\n";
-		html += "6. Time: " + $("#time").val()  + "\n";
-		html += "\n";
-		html += "7. Message: " + $("#message").val() + "\n";
-		html += "\n";
-		html += "8. Approved by: Name: " + $("#sender_name").val() + " Signature: " + $("#sender_signature").val() + " Position/Title: " + $("#sender_position").val() + "\n";
-		html += "\n";
-		html += "9. Reply: " + $("#reply").val() + "\n";
-		html += "\n";
-		html += "10. Replied by: Name: " + $("#reply_name").val() + " Signature: " + $("#reply_signature").val() + " Position/Title: " + $("#reply_position").val() + "\n";
+		html += messageText;
 		html += "</textarea>";
 		html += "</pre>";
 
@@ -154,6 +183,23 @@ $(document).ready(function(){
 			]
 		});
 	});
+
+	$("#compose-message").on("click", function() {
+		var messageText = buildMessageText();
+		var subject = $("#subject").val();
+		if (!subject) { subject = "ICS-213"; }
+
+		if (window.electronAPI && typeof window.electronAPI.openComposeFromForm === "function") {
+			window.electronAPI.openComposeFromForm({
+				to: $("#to").val(),
+				subject: subject,
+				type: "P",
+				body: messageText
+			});
+		} else {
+			alert("Compose integration is not available in this window.");
+		}
+	});
 })
 </script>
 </head>
@@ -194,6 +240,8 @@ $(document).ready(function(){
 
 <input type="button" id="generate" value="Generate/Save as Text">
 &nbsp;
+<input type="button" id="compose-message" value="Generate to Compose">
+&nbsp;
 <input type="button" id="save-data" value="Save Data">
 &nbsp;
 <input type="button" id="load-data" value="Load Data">
@@ -221,7 +269,6 @@ $(document).ready(function(){
 &nbsp;
 
 <div id="dialog" title="" style="display: none;"></div>
-<input type="file" id="load-file" accept="application/json" style="display: none;">
 
 </body>
 </html>

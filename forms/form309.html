@@ -89,7 +89,7 @@ html += '</tr>';
 			var field = $(this).attr("id");
 			data[field] = $(this).prop("checked");
 		});
-		data = JSON.stringify(data, null, 2); // pretty
+		var jsonData = JSON.stringify(data, null, 2); // pretty
 		var subject = "Communications Log";
 
 		var task = "";
@@ -103,11 +103,27 @@ html += '</tr>';
 		if ($("#time_prepared").val()) { datetime += " " + $("#time_prepared").val(); }
 		if (datetime) { subject += " -" + datetime; }
 
-		var filename = subject + ".json";
-		filename = prompt("Please enter filename to save as",filename);
+		var defaultName = subject + ".json";
+
+		if (window.electronAPI && typeof window.electronAPI.saveFile === "function") {
+			window.electronAPI.saveFile({
+				defaultPath: defaultName,
+				content: jsonData,
+				filters: [{ name: "JSON", extensions: ["json"] }]
+			}).then(function(result) {
+				if (result && !result.canceled) {
+					alert("Saved to:\n" + result.filePath);
+				}
+			}).catch(function(error) {
+				alert("Save failed: " + error.message);
+			});
+			return;
+		}
+
+		var filename = prompt("Please enter filename to save as", defaultName);
 		if (filename == null) { return; }
 
-		var new_file = new File([data],filename,{type: "application/json"});
+		var new_file = new File([jsonData],filename,{type: "application/json"});
 		var download_link = document.createElement('a');
 		download_link.style.display = 'none';
 		download_link.href = URL.createObjectURL(new_file);
@@ -118,39 +134,42 @@ html += '</tr>';
 	});
 
 	$("#load-data").on("click", function() {
-		$("#load-file").click();
-	});
-	$("#load-file").on("change", function() {
-		var new_file = $(this)[0].files[0];
-		var file_reader = new FileReader();
-		file_reader.onload = function() {
-			var data = {};
-			try {
-				data = JSON.parse(file_reader.result);
-			} catch (error) {
-				// do nothing
-			}
-			$(".log_table_row").remove();
-			$("#number_rows").val(0);
-			if (data.number_rows) {
-				add_rows(parseInt(data.number_rows));
-			}
-			for (const [key, value] of Object.entries(data)) {
-				if ($("#"+key).attr('type') == 'checkbox' && value == true) {
-					$("#"+key).prop("checked", true);
-				} else {
-					$("#"+key).val(value);
-					$("#"+key).trigger("change");
+		if (window.electronAPI && typeof window.electronAPI.pickFile === "function" && typeof window.electronAPI.readTextFile === "function") {
+			window.electronAPI.pickFile().then(function(filePath) {
+				if (!filePath) { return; }
+				return window.electronAPI.readTextFile(filePath);
+			}).then(function(fileText) {
+				if (!fileText) { return; }
+				var data = {};
+				try {
+					data = JSON.parse(fileText);
+				} catch (error) {
+					alert("Invalid JSON file.");
+					return;
 				}
-			}
-		};
-		file_reader.readAsText(new_file);
-		$("#load-file").val("");
+				$(".log_table_row").remove();
+				$("#number_rows").val(0);
+				if (data.number_rows) {
+					add_rows(parseInt(data.number_rows));
+				}
+				for (const [key, value] of Object.entries(data)) {
+					if ($("#"+key).attr('type') == 'checkbox' && value == true) {
+						$("#"+key).prop("checked", true);
+					} else {
+						$("#"+key).val(value);
+						$("#"+key).trigger("change");
+					}
+				}
+			}).catch(function(error) {
+				alert("Load failed: " + error.message);
+			});
+			return;
+		}
+
+		alert("Load integration is unavailable in this window.");
 	});
 
-	$("#generate").on("click",function() {
-		$("#dialog").empty();
-
+	function normalizeAndValidateForm() {
 		$("input[type=text], textarea").each(function() {
 			if ($(this).attr("data-default")) {
 				if ($(this).val() == $(this).attr("data-default")) {
@@ -160,7 +179,7 @@ html += '</tr>';
 			if ($(this).css("text-transform") == "uppercase") {
 				this.value = this.value.toUpperCase();
 			}
-		}); 
+		});
 
 		var missing_required = false;
 		$("input[type=text], textarea").each(function() {
@@ -169,40 +188,41 @@ html += '</tr>';
 				missing_required = true;
 			}
 		});
+
 		if (missing_required) {
 			$("input[type=text], textarea").each(function() {
 				if ($(this).attr("data-default")) {
 					$(this).trigger("blur");
 				}
 			});
-			return;
 		}
-	
-		var html = "<pre>";
-		html += '<textarea style="height:100%; width:100%; min-height: auto;">';
-		html += "PACKET COMMUNICATIONS LOG FORM 309\n";
-		html += "\n"; 
 
-		html += "Task #: " + $("#task_number").val() + "\n";
-		html += "\n"; 
+		return !missing_required;
+	}
 
-		html += "Date Prepared: " + $("#date_prepared").val() + "\n";
-		html += "Time Prepared: " + $("#time_prepared").val() + "\n";
-		html += "\n"; 
+	function buildMessageText() {
+		var messageText = "";
+		messageText += "PACKET COMMUNICATIONS LOG FORM 309\n";
+		messageText += "\n";
 
+		messageText += "Task #: " + $("#task_number").val() + "\n";
+		messageText += "\n";
 
-		html += "For Operation Period #: " + $("#operational_period").val() + "\n";
-		html += "Task Name: " + $("#task_name").val() + "\n";
-		html += "\n"; 
+		messageText += "Date Prepared: " + $("#date_prepared").val() + "\n";
+		messageText += "Time Prepared: " + $("#time_prepared").val() + "\n";
+		messageText += "\n";
 
-		html += "Radio Operator Name: " + $("#operator_name").val() + "\n";
-		html += "Station I.D.: " + $("#station_id").val() + "\n";
-		html += "\n"; 
+		messageText += "For Operation Period #: " + $("#operational_period").val() + "\n";
+		messageText += "Task Name: " + $("#task_name").val() + "\n";
+		messageText += "\n";
 
-		html += "=== LOG ===\n";
-		html += "\n";
+		messageText += "Radio Operator Name: " + $("#operator_name").val() + "\n";
+		messageText += "Station I.D.: " + $("#station_id").val() + "\n";
+		messageText += "\n";
 
-		// ignore all unused rows at the bottom
+		messageText += "=== LOG ===\n";
+		messageText += "\n";
+
 		var max_rows = $("#number_rows").val();
 		for (let i = $("#number_rows").val(); i > 0; i--) {
 			if ($("#log_time_"+i).val() || $("#log_to_"+i).val() || $("#log_from_"+i).val() || $("#log_subject_"+i).val()) {
@@ -210,17 +230,40 @@ html += '</tr>';
 				i = 0;
 			}
 		}
+
 		for (let i = 0; i < parseInt(max_rows); i++) {
 			var row = i + 1;
 
-			html += "TIME: " + $("#log_time_"+row).val() + "\n";
-			html += "TO: " + $("#log_to_"+row).val() + "\n";
-			html += "FROM: " + $("#log_from_"+row).val() + "\n";
-			html += "SUBJECT: " + $("#log_subject_"+row).val() + "\n";
-
-			html += "\n\n"
+			messageText += "TIME: " + $("#log_time_"+row).val() + "\n";
+			messageText += "TO: " + $("#log_to_"+row).val() + "\n";
+			messageText += "FROM: " + $("#log_from_"+row).val() + "\n";
+			messageText += "SUBJECT: " + $("#log_subject_"+row).val() + "\n";
+			messageText += "\n\n";
 		}
 
+		return messageText;
+	}
+
+	function getComposeRecipient() {
+		for (let i = 1; i <= parseInt($("#number_rows").val()); i++) {
+			var toField = $("#log_to_" + i).val();
+			if (toField) {
+				return toField;
+			}
+		}
+		return "";
+	}
+
+	$("#generate").on("click",function() {
+		$("#dialog").empty();
+		if (!normalizeAndValidateForm()) {
+			return;
+		}
+		var messageText = buildMessageText();
+	
+		var html = "<pre>";
+		html += '<textarea style="height:100%; width:100%; min-height: auto;">';
+		html += messageText;
 		html += "</textarea>\n";
 		html += "</pre>";
 
@@ -247,10 +290,10 @@ html += '</tr>';
 					icon: "ui-icon-document",
 					class: "save-button",
 					click: function() {
-						var subject = "Radiogram";
-						if ($("#radiogram_number").val()) { subject += " " + $("#radiogram_number").val(); }
+						var subject = "Communications Log";
+						if ($("#task_name").val()) { subject += " " + $("#task_name").val(); }
 
-						var filename = subject + " " + $("#date").val() + " " + $("#time").val() + ".txt";
+						var filename = subject + " " + $("#date_prepared").val() + " " + $("#time_prepared").val() + ".txt";
 						filename = prompt("Please enter filename to save as",filename);
 						if (filename == null) { return; }
 
@@ -293,6 +336,29 @@ html += '</tr>';
 			]
 		});
 	});
+
+	$("#compose-message").on("click", function() {
+		if (!normalizeAndValidateForm()) {
+			return;
+		}
+
+		var messageText = buildMessageText();
+		var subject = "Form 309 Communications Log";
+		if ($("#task_name").val()) {
+			subject += " - " + $("#task_name").val();
+		}
+
+		if (window.electronAPI && typeof window.electronAPI.openComposeFromForm === "function") {
+			window.electronAPI.openComposeFromForm({
+				to: getComposeRecipient(),
+				subject: subject,
+				type: "P",
+				body: messageText
+			});
+		} else {
+			alert("Compose integration is not available in this window.");
+		}
+	});
 })
 </script>
 </head>
@@ -334,6 +400,8 @@ Station I.D.: <input type="text" size=20 id="station_id" value="" required>
 
 <input type="button" id="generate" value="Generate/Save as Text">
 &nbsp;
+<input type="button" id="compose-message" value="Generate to Compose">
+&nbsp;
 <input type="button" id="save-data" value="Save Data">
 &nbsp;
 <input type="button" id="load-data" value="Load Data">
@@ -361,7 +429,6 @@ Station I.D.: <input type="text" size=20 id="station_id" value="" required>
 &nbsp;
 
 <div id="dialog" title="" style="display: none;"></div>
-<input type="file" id="load-file" accept="application/json" style="display: none;">
 
 </body>
 </html>

@@ -52,17 +52,32 @@ $(document).ready(function(){
 					data[field] = "";
 					return;
 				}
-			};
+			}
 			data[field] = $(this).val();
 		});
-		data = JSON.stringify(data);
+		var jsonData = JSON.stringify(data, null, 2);
 		var subject = "Packet Check-In";
+		var defaultName = subject + " " + $("#datetime").val() + ".json";
 
-		var filename = subject + " " + $("#datetime").val() + ".json";
-		filename = prompt("Please enter filename to save as",filename);
+		if (window.electronAPI && typeof window.electronAPI.saveFile === "function") {
+			window.electronAPI.saveFile({
+				defaultPath: defaultName,
+				content: jsonData,
+				filters: [{ name: "JSON", extensions: ["json"] }]
+			}).then(function(result) {
+				if (result && !result.canceled) {
+					alert("Saved to:\n" + result.filePath);
+				}
+			}).catch(function(error) {
+				alert("Save failed: " + error.message);
+			});
+			return;
+		}
+
+		var filename = prompt("Please enter filename to save as", defaultName);
 		if (filename == null) { return; }
 
-		var new_file = new File([data],filename,{type: "application/json"});
+		var new_file = new File([jsonData], filename, { type: "application/json" });
 		var download_link = document.createElement('a');
 		download_link.style.display = 'none';
 		download_link.href = URL.createObjectURL(new_file);
@@ -73,27 +88,65 @@ $(document).ready(function(){
 	});
 
 	$("#load-data").on("click", function() {
-		$("#load-file").click();
+		if (window.electronAPI && typeof window.electronAPI.pickFile === "function" && typeof window.electronAPI.readTextFile === "function") {
+			window.electronAPI.pickFile().then(function(filePath) {
+				if (!filePath) { return; }
+				return window.electronAPI.readTextFile(filePath);
+			}).then(function(fileText) {
+				if (!fileText) { return; }
+				var data = {};
+				try {
+					data = JSON.parse(fileText);
+				} catch (error) {
+					alert("Invalid JSON file.");
+					return;
+				}
+				for (const [key, value] of Object.entries(data)) { $("#"+key).val(value); $("#"+key).trigger("change"); }
+			}).catch(function(error) {
+				alert("Load failed: " + error.message);
+			});
+			return;
+		}
+
+		alert("Load integration is unavailable in this window.");
 	});
-	$("#load-file").on("change", function() {
-		var new_file = $(this)[0].files[0];
-		var file_reader = new FileReader();
-		file_reader.onload = function() {
-			var data = {};
-			try {
-				data = JSON.parse(file_reader.result);
-			} catch (error) {
-				// do nothing
-			}
-			for (const [key, value] of Object.entries(data)) { $("#"+key).val(value); $("#"+key).trigger("change"); }
-		};
-		file_reader.readAsText(new_file);
 
-	});
+	function buildMessageText() {
+		var messageText = "";
+		messageText += "PACKET CHECK-IN\n";
+		messageText += "\n";
+		if ($("#agency").val()) {
+			messageText += $("#agency").val() + "\n";
+			messageText += "\n";
+		}
+		messageText += "1. STATION\n";
+		messageText += "\n";
+		messageText += "a. Date/Time: " + $("#datetime").val() + "\n";
+		messageText += "\n";
+		messageText += "b. To: " + $("#to").val() + "\n";
+		messageText += "\n";
+		messageText += "c. From: " + $("#from").val() + "    d. Station Contact Name: " + $("#contact").val() + "    e. Initial Operator(s): " + $("#operator").val() + "\n";
+		messageText += "\n";
+		messageText += "\n";
+		messageText += "2. SESSION\n";
+		messageText += "\n";
+		messageText += "a. Type: " + $("#session_type").val() + "    b. Service: " + $("#service_type").val() + "    c. Band: " + $("#band").val() + "\n";
+		messageText += "\n";
+		messageText += "d. Session: " + $("#mode").val() + "\n";
+		messageText += "\n";
+		messageText += "\n";
+		messageText += "3. LOCATION\n";
+		messageText += "\n";
+		messageText += "a. Location: " + $("#location").val() + "\n";
+		messageText += "\n";
+		messageText += "b. GRID SQUARE: " + $("#gridsquare").val() + "\n";
+		messageText += "\n";
+		messageText += "\n";
+		messageText += "4. COMMENTS: " + $("#comments").val() + "\n";
+		return messageText;
+	}
 
-	$("#generate").on("click",function() {
-		$("#dialog").empty();
-
+	function clearDefaultFieldValues() {
 		$("input[type=text], textarea").each(function() {
 			if ($(this).attr("data-default")) {
 				if ($(this).val() == $(this).attr("data-default")) {
@@ -101,39 +154,16 @@ $(document).ready(function(){
 				}
 			}
 		});
-	
+	}
+
+	$("#generate").on("click",function() {
+		$("#dialog").empty();
+		clearDefaultFieldValues();
+		var messageText = buildMessageText();
+
 		var html = "<pre>";
 		html += '<textarea style="height:100%; width:100%; min-height: auto;">';
-		html += "PACKET CHECK-IN\n";
-		html += "\n";
-		if ($("#agency").val()) {
-			html += $("#agency").val() + "\n";
-			html += "\n";
-		}
-		html += "1. STATION\n";
-		html += "\n";
-		html += "a. Date/Time: " + $("#datetime").val() + "\n";
-		html += "\n";
-		html += "b. To: " + $("#to").val() + "\n";
-		html += "\n";
-		html += "c. From: " + $("#from").val() + "    d. Station Contact Name: " + $("#contact").val() + "    e. Initial Operator(s): " + $("#operator").val() + "\n";
-		html += "\n";
-		html += "\n";
-		html += "2. SESSION\n";
-		html += "\n";
-		html += "a. Type: " + $("#session_type").val() + "    b. Service: " + $("#service_type").val() + "    c. Band: " + $("#band").val() + "\n";
-		html += "\n";
-		html += "d. Session: " + $("#mode").val() + "\n";
-		html += "\n";
-		html += "\n";
-		html += "3. LOCATION\n";
-		html += "\n";
-		html += "a. Location: " + $("#location").val() + "\n";
-		html += "\n";
-		html += "b. GRID SQUARE: " + $("#gridsquare").val() + "\n";
-		html += "\n";
-		html += "\n";
-		html += "4. COMMENTS: " + $("#comments").val() + "\n";
+		html += messageText;
 		html += "</textarea>\n";
 		html += "</pre>";
 
@@ -205,6 +235,22 @@ $(document).ready(function(){
 			]
 		});
 	});
+
+	$("#compose-message").on("click", function() {
+		clearDefaultFieldValues();
+		var messageText = buildMessageText();
+
+		if (window.electronAPI && typeof window.electronAPI.openComposeFromForm === "function") {
+			window.electronAPI.openComposeFromForm({
+				to: $("#to").val(),
+				subject: "Packet Check-In",
+				type: "P",
+				body: messageText
+			});
+		} else {
+			alert("Compose integration is not available in this window.");
+		}
+	});
 })
 </script>
 </head>
@@ -222,7 +268,9 @@ a. Date/Time: <input type="text" name="datetime" id="datetime" value="">
 
 b. To: <input type="text" name="to" id="to" size=50 value="">
 
-c. From: <input type="text" name="from" id="from" size=20 value="">    d. Station Contact Name: <input type="text" name="contact" id="contact" value="">    e. Initial Operator(s): <input type="text" name="operator" id="operator" size=50 value="">
+c. From: <input type="text" name="from" id="from" size=15 value="">  d. Station Contact Name: <input type="text" name="contact" id="contact" value="">  
+
+e. Initial Operator(s): <input type="text" name="operator" id="operator" size=50 value="">
 
 
 2. SESSION
@@ -249,6 +297,8 @@ b. YOUR GRID SQUARE: <input type="text" name="gridsquare" id="gridsquare" size=8
 <br>
 
 <input type="button" id="generate" value="Generate/Save as Text">
+&nbsp;
+<input type="button" id="compose-message" value="Generate to Compose">
 &nbsp;
 <input type="button" id="save-data" value="Save Data">
 &nbsp;
@@ -277,7 +327,6 @@ b. YOUR GRID SQUARE: <input type="text" name="gridsquare" id="gridsquare" size=8
 &nbsp;
 
 <div id="dialog" title="" style="display: none;"></div>
-<input type="file" id="load-file" accept="application/json" style="display: none;">
 
 </body>
 </html>

@@ -1913,6 +1913,18 @@ window.addEventListener('DOMContentLoaded', async () => {
         //composeModal.style.display = "flex";
     });
 
+    window.electronAPI.onComposeFromForm(async (payload) => {
+        isReplyMode = false;
+
+        const safePayload = payload || {};
+        await openComposeModal({ to: (safePayload.to || "").trim() });
+
+        composeType.value = safePayload.type || "P";
+        composeSubject.value = safePayload.subject || "";
+        composeBody.value = safePayload.body || "";
+        composeBody.focus();
+    });
+
     async function openComposeModal(prefill = {}) {
         const list = document.getElementById("callsignList");
         const toInput = document.getElementById("composeTo");

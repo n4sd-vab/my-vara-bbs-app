@@ -102,7 +102,7 @@ const menuTemplate = [
   submenu: [
     { label: "ICS 213", click: () => openFormWindow("ics213.html", "ICS‑213 Form") },
     { label: "Check In", click: () => openFormWindow("check_in.html", "PKTNET Check-In") },
-    { label: "ICS 309", click: () => openFormWindow("form309.html", "ICS‑309 Communications Log") }
+    { label: "Form-309", click: () => openFormWindow("form309.html", "ICS‑309 Communications Log") }
   ]
 },
   {
@@ -178,7 +178,7 @@ function openFormWindow(filename, title) {
     parent: mainWindow,
     title,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js")
+      preload: path.join(__dirname, '..', 'preload.js')
     }
   });
 

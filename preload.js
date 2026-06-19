@@ -84,6 +84,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     // Use for sending toast requests from renderer to main (e.g. from settings page)
     showToast: (text) => ipcRenderer.send("ui:toast", text),
+
+    // Forms can request opening the compose modal in the main window
+    openComposeFromForm: (payload) =>
+        ipcRenderer.send("forms:compose-message", payload),
+
+    onComposeFromForm: (callback) =>
+        _subscribe("forms:compose-message", callback),
     
 
     //
@@ -266,6 +273,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     pickFile: () =>
         ipcRenderer.invoke("fs:pick-file"),
+
+    readTextFile: (filePath) =>
+        ipcRenderer.invoke("fs:read-text-file", filePath),
+
+    saveFile: (payload) =>
+        ipcRenderer.invoke("fs:save-file", payload),
 
     onOpenYappSend: (callback) =>
         ipcRenderer.on("yapp:open-send", callback),

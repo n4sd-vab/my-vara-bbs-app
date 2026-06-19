@@ -51,6 +51,15 @@ class IpcHandlers {
       mainWindow.webContents.send("ui:open-preferences");
     });
 
+    ipcMain.on("forms:compose-message", (event, payload) => {
+      const senderWindow = BrowserWindow.fromWebContents(event.sender);
+      const targetWindow = (senderWindow && senderWindow.getParentWindow()) || BrowserWindow.getAllWindows()[0];
+
+      if (targetWindow && !targetWindow.isDestroyed()) {
+        targetWindow.webContents.send("forms:compose-message", payload || {});
+      }
+    });
+
 
     // Message handlers
 
@@ -285,6 +294,33 @@ class IpcHandlers {
 
     ipcMain.handle("pick-file", pickFileHandler);
     ipcMain.handle("fs:pick-file", pickFileHandler);
+
+    ipcMain.handle("fs:read-text-file", async (_event, filePath) => {
+      if (!filePath) {
+        return null;
+      }
+
+      try {
+        return await fs.promises.readFile(filePath, "utf8");
+      } catch (err) {
+        console.error("Failed to read text file:", err);
+        return null;
+      }
+    });
+
+    ipcMain.handle("fs:save-file", async (_event, { defaultPath, content, filters }) => {
+      const result = await dialog.showSaveDialog({
+        defaultPath,
+        filters: filters || []
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { canceled: true };
+      }
+
+      await fs.promises.writeFile(result.filePath, content, "utf8");
+      return { canceled: false, filePath: result.filePath };
+    });
 
     ipcMain.on("fs:downloaded", (event, file) => {
       if (isImage(file.filename)) openImageWindow(file.fullPath);
