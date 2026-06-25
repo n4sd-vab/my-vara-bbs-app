@@ -53,7 +53,12 @@ class IpcHandlers {
 
     ipcMain.on("forms:compose-message", (event, payload) => {
       const senderWindow = BrowserWindow.fromWebContents(event.sender);
-      const targetWindow = (senderWindow && senderWindow.getParentWindow()) || BrowserWindow.getAllWindows()[0];
+      const windows = BrowserWindow.getAllWindows();
+      const targetWindow =
+        (senderWindow && senderWindow.getParentWindow()) ||
+        BrowserWindow.getFocusedWindow() ||
+        windows.find(w => !w.getParentWindow()) ||
+        windows[0];
 
       if (targetWindow && !targetWindow.isDestroyed()) {
         targetWindow.webContents.send("forms:compose-message", payload || {});
@@ -343,9 +348,15 @@ class IpcHandlers {
   }
 
   sendToRenderer(event, data) {
+    const focused = BrowserWindow.getFocusedWindow();
     const windows = BrowserWindow.getAllWindows();
-    if (windows.length > 0) {
-      windows[0].webContents.send(event, data);
+    const targetWindow =
+      (focused && (focused.getParentWindow() || focused)) ||
+      windows.find(w => !w.getParentWindow()) ||
+      windows[0];
+
+    if (targetWindow && !targetWindow.isDestroyed()) {
+      targetWindow.webContents.send(event, data);
     }
   }
 }

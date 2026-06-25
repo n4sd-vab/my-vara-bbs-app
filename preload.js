@@ -176,6 +176,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onCommandOutput: (callback) =>
         ipcRenderer.on("bbs:command-output", (_e, line) => callback(line)),
 
+    onBbsPromptReady: (callback) =>
+        _subscribe("bbs:prompt-ready", callback),
+
 
     //
     // CONTEXT MENU

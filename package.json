@@ -1,6 +1,6 @@
 {
   "name": "my-vara-bbs-app",
-  "version": "1.0.26",
+  "version": "1.0.27",
   "description": "Native VARA BBS Client",
   "main": "src/main.js",
   "scripts": {

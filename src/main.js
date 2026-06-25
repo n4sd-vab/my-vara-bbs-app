@@ -254,9 +254,9 @@ app.on('window-all-closed', () => {
 
 console.log("DB Path:", path.join(app.getPath('userData'), 'bbs.db'));
 
-// Check for new BBS messages every 30 minutes
+// Check for new BBS messages every 2 hours
 /* setInterval(() => {
     mainWindow.webContents.send("ui:toast", "Auto-checking for new messages…");
     shell.beep();
     bbsProtocol.receiveMessages();
-}, 30 * 60 * 1000); */
+}, 2 * 60 * 60 * 1000); */

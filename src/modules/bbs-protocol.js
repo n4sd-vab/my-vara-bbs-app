@@ -444,6 +444,7 @@ class BbsProtocol {
       const line = raw.trim();
       if (/^\s*de\s+[A-Z0-9\-]+>\s*$/i.test(line)) {
         this.varaConnection.bbsPromptReady = true;
+        this.sendToRenderer('bbs:prompt-ready', true);
         console.log("DATA: BBS prompt detected");
         //this.commandMode = false;
       }
@@ -609,6 +610,7 @@ class BbsProtocol {
       if (footer) {
         const msgNum = parseInt(footer[1]);
         console.log("Explicit footer for msg", msgNum);
+        this.sendToRenderer("ui:toast", `Message ${msgNum} downloaded`);
 
         this.currentReadBody.push(raw);
         const body = this.currentReadBody.join("\n");
@@ -746,16 +748,28 @@ class BbsProtocol {
   }
 
   logToRenderer(type, msg) {
+    const focused = BrowserWindow.getFocusedWindow();
     const windows = BrowserWindow.getAllWindows();
-    if (windows.length > 0) {
-      windows[0].webContents.send('vara:log', { type, msg });
+    const targetWindow =
+      (focused && (focused.getParentWindow() || focused)) ||
+      windows.find(w => !w.getParentWindow()) ||
+      windows[0];
+
+    if (targetWindow && !targetWindow.isDestroyed()) {
+      targetWindow.webContents.send('vara:log', { type, msg });
     }
   }
 
   sendToRenderer(event, data) {
+    const focused = BrowserWindow.getFocusedWindow();
     const windows = BrowserWindow.getAllWindows();
-    if (windows.length > 0) {
-      windows[0].webContents.send(event, data);
+    const targetWindow =
+      (focused && (focused.getParentWindow() || focused)) ||
+      windows.find(w => !w.getParentWindow()) ||
+      windows[0];
+
+    if (targetWindow && !targetWindow.isDestroyed()) {
+      targetWindow.webContents.send(event, data);
     }
   }
 }

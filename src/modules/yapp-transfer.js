@@ -309,16 +309,28 @@ class YappTransfer extends EventEmitter {
 
   // Utility methods
   logToRenderer(type, msg) {
+    const focused = BrowserWindow.getFocusedWindow();
     const windows = BrowserWindow.getAllWindows();
-    if (windows.length > 0) {
-      windows[0].webContents.send('vara:log', { type, msg });
+    const targetWindow =
+      (focused && (focused.getParentWindow() || focused)) ||
+      windows.find(w => !w.getParentWindow()) ||
+      windows[0];
+
+    if (targetWindow && !targetWindow.isDestroyed()) {
+      targetWindow.webContents.send('vara:log', { type, msg });
     }
   }
 
   sendToRenderer(event, data) {
+    const focused = BrowserWindow.getFocusedWindow();
     const windows = BrowserWindow.getAllWindows();
-    if (windows.length > 0) {
-      windows[0].webContents.send(event, data);
+    const targetWindow =
+      (focused && (focused.getParentWindow() || focused)) ||
+      windows.find(w => !w.getParentWindow()) ||
+      windows[0];
+
+    if (targetWindow && !targetWindow.isDestroyed()) {
+      targetWindow.webContents.send(event, data);
     }
   }
 

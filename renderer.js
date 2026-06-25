@@ -71,6 +71,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     const YAPP_SEND_MODAL_CLOSE_DELAY_MS = 5000;
     const YAPP_SEND_MODAL_REPLY_CLOSE_DELAY_MS = 2500;
 
+    window.electronAPI.onBbsPromptReady((ready) => {
+        bbsPromptReady = Boolean(ready);
+        if (bbsPromptReady) {
+            console.log("BBS prompt synced from main process");
+        }
+    });
+
     const addCallsign = document.getElementById('addCallsign');
     const addName = document.getElementById('addName');
     const addAddress = document.getElementById('addAddress');
@@ -707,10 +714,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         ].join(" ");
     }
 
-    //window.electronAPI.onToast((text) => {
-    //   showToast(text);
-    //});
-
     window.showToast = function (text) {
         const container = document.getElementById("toastContainer");
 
@@ -720,15 +723,19 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         container.appendChild(toast);
 
-        // Animate in
+        // Animate in 10ms later to allow CSS transition
         setTimeout(() => toast.classList.add("visible"), 10);
 
-        // Auto-remove
+        // Auto-remove after 2.5 seconds
         setTimeout(() => {
             toast.classList.remove("visible");
             setTimeout(() => toast.remove(), 300);
         }, 2500);
     };
+
+    window.electronAPI.onToast((text) => {
+        window.showToast(text);
+    });
 
     function showCategoryPopup() {
         const modal = document.getElementById("categoryModal");
@@ -1685,6 +1692,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.electronAPI.onOpenAbout(() => {
         document.getElementById("aboutModal").style.display = "flex";
     });
+    
     //  
     // Listen for message context menu events
     // 
